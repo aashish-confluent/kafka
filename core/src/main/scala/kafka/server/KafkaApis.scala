@@ -718,7 +718,7 @@ class KafkaApis(val requestChannel: RequestChannel,
             requestHelper.throttle(quotas.request, request, requestThrottleTimeMs)
           }
           // If throttling is required, return an empty response.
-          fetchContext.getThrottledResponse(maxThrottleTimeMs, nodeEndpoints.values.toSeq.asJava)
+          fetchContext.getThrottledResponse(maxThrottleTimeMs, partitions, nodeEndpoints.values.toSeq.asJava)
         } else {
           // Get the actual response. This will update the fetch context.
           val fetchResponse = fetchContext.updateAndGenerateResponseData(partitions, nodeEndpoints.values.toSeq.asJava)

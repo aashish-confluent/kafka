@@ -122,7 +122,7 @@ public class FetchManager {
                                     session.id(), session.epoch(), partitionsToLogString(added),
                                     partitionsToLogString(updated), partitionsToLogString(removed));
 
-                                return new IncrementalFetchContext(reqMetadata, session, topicNames);
+                                return new IncrementalFetchContext(reqMetadata, session, cacheShard, topicNames);
                             }
                         }
                     }

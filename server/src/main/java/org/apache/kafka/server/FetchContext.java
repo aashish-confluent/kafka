@@ -75,8 +75,26 @@ public sealed interface FetchContext {
     /**
      * Return an empty throttled response due to quota violation.
      */
-    default FetchResponse getThrottledResponse(int throttleTimeMs, List<Node> nodeEndpoints) {
+    default FetchResponse getThrottledResponse(int throttleTimeMs,
+                                               LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> updates,
+                                               List<Node> nodeEndpoints) {
         return FetchResponse.of(Errors.NONE, throttleTimeMs, INVALID_SESSION_ID, new LinkedHashMap<>(), nodeEndpoints);
+    }
+
+    /**
+     * Partitions the client is not authorized for, or (for non-privileged sessions) that are unknown,
+     * should not be kept in a fetch session.
+     */
+    private static boolean hasUncacheablePartition(LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> updates,
+                                                   boolean privileged) {
+        for (FetchResponseData.PartitionData respData : updates.values()) {
+            short errorCode = respData.errorCode();
+            if (errorCode == Errors.TOPIC_AUTHORIZATION_FAILED.code() || (!privileged &&
+                    (errorCode == Errors.UNKNOWN_TOPIC_OR_PARTITION.code() || errorCode == Errors.UNKNOWN_TOPIC_ID.code()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -211,6 +229,11 @@ public sealed interface FetchContext {
         @Override
         public FetchResponse updateAndGenerateResponseData(LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> updates,
                                                            List<Node> nodeEndpoints) {
+            if (updates.isEmpty() || hasUncacheablePartition(updates, isFromFollower)) {
+                LOGGER.debug("Full fetch context not creating a session for no partitions or an unauthorized or unknown partition, returning {}",
+                    partitionsToLogString(updates.keySet(), LOGGER.isTraceEnabled()));
+                return FetchResponse.of(Errors.NONE, 0, INVALID_SESSION_ID, updates, nodeEndpoints);
+            }
             FetchSessionCacheShard cacheShard = cache.getNextCacheShard();
             int responseSessionId = cacheShard.maybeCreateSession(time.milliseconds(), isFromFollower,
                 updates.size(), usesTopicIds, () -> createNewSession(updates));
@@ -241,18 +264,22 @@ public sealed interface FetchContext {
 
         private final FetchMetadata reqMetadata;
         private final FetchSession session;
+        private final FetchSessionCacheShard cacheShard;
         private final Map<Uuid, String> topicNames;
 
         /**
          * @param reqMetadata  The request metadata
          * @param session      The incremental fetch request session
+         * @param cacheShard   The cache shard which holds the session
          * @param topicNames   A mapping from topic ID to topic name used to resolve partitions already in the session
          */
         public IncrementalFetchContext(FetchMetadata reqMetadata,
                                        FetchSession session,
+                                       FetchSessionCacheShard cacheShard,
                                        Map<Uuid, String> topicNames) {
             this.reqMetadata = reqMetadata;
             this.session = session;
+            this.cacheShard = cacheShard;
             this.topicNames = topicNames;
         }
 
@@ -354,20 +381,26 @@ public sealed interface FetchContext {
                         session.id(), expectedEpoch, session.epoch());
                     return FetchResponse.of(Errors.INVALID_FETCH_SESSION_EPOCH, 0, session.id(), new LinkedHashMap<>(), nodeEndpoints);
                 } else {
+                    boolean uncacheable = hasUncacheablePartition(updates, session.privileged());
                     // Iterate over the update list using PartitionIterator. This will prune updates which don't need to be sent
                     PartitionIterator partitionIter = new PartitionIterator(updates.entrySet().iterator(), true);
                     while (partitionIter.hasNext()) {
                         partitionIter.next();
                     }
-                    LOGGER.debug("Incremental fetch context with session id {} returning {}", session.id(),
-                        partitionsToLogString(updates.keySet(), LOGGER.isTraceEnabled()));
-                    return FetchResponse.of(Errors.NONE, 0, session.id(), updates, nodeEndpoints);
+                    if (!uncacheable) {
+                        LOGGER.debug("Incremental fetch context with session id {} returning {}", session.id(),
+                            partitionsToLogString(updates.keySet(), LOGGER.isTraceEnabled()));
+                        return FetchResponse.of(Errors.NONE, 0, session.id(), updates, nodeEndpoints);
+                    }
                 }
             }
+            return closeSession(0, updates, nodeEndpoints);
         }
 
         @Override
-        public FetchResponse getThrottledResponse(int throttleTimeMs, List<Node> nodeEndpoints) {
+        public FetchResponse getThrottledResponse(int throttleTimeMs,
+                                                  LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> updates,
+                                                  List<Node> nodeEndpoints) {
             synchronized (session) {
                 // Check to make sure that the session epoch didn't change in between
                 // creating this fetch context and generating this response.
@@ -376,10 +409,21 @@ public sealed interface FetchContext {
                     LOGGER.info("Incremental fetch session {} expected epoch {}, but got {}. Possible duplicate request.",
                         session.id(), expectedEpoch, session.epoch());
                     return FetchResponse.of(Errors.INVALID_FETCH_SESSION_EPOCH, throttleTimeMs, session.id(), new LinkedHashMap<>(), nodeEndpoints);
-                } else {
+                } else if (!hasUncacheablePartition(updates, session.privileged())) {
                     return FetchResponse.of(Errors.NONE, throttleTimeMs, session.id(), new LinkedHashMap<>(), nodeEndpoints);
                 }
             }
+            return closeSession(throttleTimeMs, new LinkedHashMap<>(), nodeEndpoints);
+        }
+
+        private FetchResponse closeSession(int throttleTimeMs,
+                                           LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> responseData,
+                                           List<Node> nodeEndpoints) {
+            // Called without the session lock held, since the cache shard lock must be taken first.
+            cacheShard.remove(session);
+            LOGGER.debug("Incremental fetch context closing session {} because of an unauthorized or unknown partition, returning {}",
+                session.id(), partitionsToLogString(responseData.keySet(), LOGGER.isTraceEnabled()));
+            return FetchResponse.of(Errors.NONE, throttleTimeMs, INVALID_SESSION_ID, responseData, nodeEndpoints);
         }
     }
 }

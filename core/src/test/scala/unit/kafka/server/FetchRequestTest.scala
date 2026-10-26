@@ -353,8 +353,8 @@ class FetchRequestTest extends BaseFetchRequestTest {
   }
 
   /**
-   * Test that when an incremental fetch session contains partitions with an error,
-   * those partitions are returned in all incremental fetch requests.
+   * Test that a consumer fetch session is not created while a requested partition is unknown,
+   * and that it is created and continued normally once every partition exists.
    * This tests using FetchRequests that don't use topic IDs
    */
   @Test
@@ -378,42 +378,28 @@ class FetchRequestTest extends BaseFetchRequestTest {
     val req1 = createConsumerFetchRequest(List(foo0, foo1, bar0), JFetchMetadata.INITIAL, Nil)
     val resp1 = sendFetchRequest(0, req1)
     assertEquals(Errors.NONE, resp1.error())
-    assertTrue(resp1.sessionId() > 0, "Expected the broker to create a new incremental fetch session")
-    debug(s"Test created an incremental fetch session ${resp1.sessionId}")
+    assertEquals(JFetchMetadata.INVALID_SESSION_ID, resp1.sessionId(),
+      "Expected no fetch session while a partition is unknown")
     val responseData1 = resp1.responseData(topicNames, 12)
-    assertTrue(responseData1.containsKey(foo0))
-    assertTrue(responseData1.containsKey(foo1))
-    assertTrue(responseData1.containsKey(bar0))
     assertEquals(Errors.NONE.code, responseData1.get(foo0).errorCode)
     assertEquals(Errors.NONE.code, responseData1.get(foo1).errorCode)
     assertEquals(Errors.UNKNOWN_TOPIC_OR_PARTITION.code, responseData1.get(bar0).errorCode)
-    val req2 = createConsumerFetchRequest(Nil, new JFetchMetadata(resp1.sessionId(), 1), Nil)
-    val resp2 = sendFetchRequest(0, req2)
-    assertEquals(Errors.NONE, resp2.error())
-    assertEquals(resp1.sessionId(),
-      resp2.sessionId(), "Expected the broker to continue the incremental fetch session")
-    val responseData2 = resp2.responseData(topicNames, 12)
-    assertFalse(responseData2.containsKey(foo0))
-    assertFalse(responseData2.containsKey(foo1))
-    assertTrue(responseData2.containsKey(bar0))
-    assertEquals(Errors.UNKNOWN_TOPIC_OR_PARTITION.code, responseData2.get(bar0).errorCode)
     createTopicWithAssignment("bar", Map(0 -> List(0, 1)))
     TestUtils.waitUntilLeaderIsKnown(brokers, bar0)
-    val req3 = createConsumerFetchRequest(Nil, new JFetchMetadata(resp1.sessionId(), 2), Nil)
+    val req2 = createConsumerFetchRequest(List(foo0, foo1, bar0), JFetchMetadata.INITIAL, Nil)
+    val resp2 = sendFetchRequest(0, req2)
+    assertEquals(Errors.NONE, resp2.error())
+    assertTrue(resp2.sessionId() > 0, "Expected the broker to create a new incremental fetch session")
+    val responseData2 = resp2.responseData(topicNames, 12)
+    assertEquals(Errors.NONE.code, responseData2.get(bar0).errorCode)
+    val req3 = createConsumerFetchRequest(Nil, new JFetchMetadata(resp2.sessionId(), 1), Nil)
     val resp3 = sendFetchRequest(0, req3)
     assertEquals(Errors.NONE, resp3.error())
+    assertEquals(resp2.sessionId(), resp3.sessionId(), "Expected the broker to continue the incremental fetch session")
     val responseData3 = resp3.responseData(topicNames, 12)
     assertFalse(responseData3.containsKey(foo0))
     assertFalse(responseData3.containsKey(foo1))
-    assertTrue(responseData3.containsKey(bar0))
-    assertEquals(Errors.NONE.code, responseData3.get(bar0).errorCode)
-    val req4 = createConsumerFetchRequest(Nil, new JFetchMetadata(resp1.sessionId(), 3), Nil)
-    val resp4 = sendFetchRequest(0, req4)
-    assertEquals(Errors.NONE, resp4.error())
-    val responseData4 = resp4.responseData(topicNames, 12)
-    assertFalse(responseData4.containsKey(foo0))
-    assertFalse(responseData4.containsKey(foo1))
-    assertFalse(responseData4.containsKey(bar0))
+    assertFalse(responseData3.containsKey(bar0))
   }
 
   /**

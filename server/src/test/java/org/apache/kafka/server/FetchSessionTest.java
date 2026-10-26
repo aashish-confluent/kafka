@@ -42,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -383,7 +384,7 @@ public class FetchSessionTest {
         FetchRequest request7 = createRequest(new FetchMetadata(resp2.sessionId(), 2), new LinkedHashMap<>(),
             List.of(), false, FETCH.latestVersion());
         FetchContext context7 = newContext(fetchManager, request7, topicNames);
-        FetchResponse resp7 = context7.getThrottledResponse(100, List.of());
+        FetchResponse resp7 = context7.getThrottledResponse(100, new LinkedHashMap<>(), List.of());
         assertEquals(Errors.NONE, resp7.error());
         assertEquals(resp2.sessionId(), resp7.sessionId());
         assertEquals(100, resp7.throttleTimeMs());
@@ -554,7 +555,7 @@ public class FetchSessionTest {
         reqData1.put(foo0.topicPartition(), new PartitionData(foo0.topicId(), 0, 0, 100, Optional.empty()));
         reqData1.put(foo1.topicPartition(), new PartitionData(foo1.topicId(), 10, 0, 100, Optional.empty()));
         reqData1.put(zar0.topicPartition(), new PartitionData(zar0.topicId(), 10, 0, 100, Optional.empty()));
-        FetchRequest request1 = createRequest(INITIAL, reqData1, List.of(), false, FETCH.latestVersion());
+        FetchRequest request1 = createRequest(INITIAL, reqData1, List.of(), true, FETCH.latestVersion());
         // Simulate unknown topic ID for foo.
         Map<Uuid, String> topicNamesOnlyBar = Map.of(barId, "bar");
         // We should not throw error since we have an older request version.
@@ -588,7 +589,7 @@ public class FetchSessionTest {
         );
 
         // Create an incremental request where we resolve the partitions
-        FetchRequest request2 = createRequest(new FetchMetadata(resp1.sessionId(), 1), new LinkedHashMap<>(), List.of(), false, FETCH.latestVersion());
+        FetchRequest request2 = createRequest(new FetchMetadata(resp1.sessionId(), 1), new LinkedHashMap<>(), List.of(), true, FETCH.latestVersion());
         Map<Uuid, String> topicNamesNoZar = Map.of(fooId, "foo", barId, "bar");
         FetchContext context2 = newContext(fetchManager, request2, topicNamesNoZar);
         assertInstanceOf(IncrementalFetchContext.class, context2);
@@ -714,7 +715,7 @@ public class FetchSessionTest {
         LinkedHashMap<TopicPartition, FetchRequest.PartitionData> reqData1 = new LinkedHashMap<>();
         reqData1.put(tp0.topicPartition(), new PartitionData(tp0.topicId(), 0, 0, 100, Optional.empty()));
         reqData1.put(tp1.topicPartition(), new PartitionData(tp1.topicId(), 10, 0, 100, Optional.empty()));
-        FetchRequest request1 = createRequest(INITIAL, reqData1, List.of(), false, FETCH.latestVersion());
+        FetchRequest request1 = createRequest(INITIAL, reqData1, List.of(), true, FETCH.latestVersion());
         // Start a fetch session. Simulate unknown partition foo-0.
         FetchContext context1 = newContext(fetchManager, request1, topicNames);
         assertInstanceOf(FullFetchContext.class, context1);
@@ -737,7 +738,7 @@ public class FetchSessionTest {
         assertEquals(2, resp1.responseData(topicNames, request1.version()).size());
 
         // Create an incremental fetch request as though no topics changed.
-        FetchRequest request2 = createRequest(new FetchMetadata(resp1.sessionId(), 1), new LinkedHashMap<>(), List.of(), false, FETCH.latestVersion());
+        FetchRequest request2 = createRequest(new FetchMetadata(resp1.sessionId(), 1), new LinkedHashMap<>(), List.of(), true, FETCH.latestVersion());
         // Simulate ID changing on server.
         Map<Uuid, String> topicNamesFooChanged = Map.of(topicIds.get("bar"), "bar", Uuid.randomUuid(), "foo");
         FetchContext context2 = newContext(fetchManager, request2, topicNamesFooChanged);
@@ -1537,6 +1538,180 @@ public class FetchSessionTest {
             assertEquals(cacheShards.get(shardNum % numShards), cache.getNextCacheShard());
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFullFetchWithUnauthorizedPartitionCreatesNoSession(boolean isFollower) {
+        FetchSessionCacheShard cacheShard = new FetchSessionCacheShard(10, 1000, Integer.MAX_VALUE, 0);
+        FetchManager fetchManager = new FetchManager(new MockTime(), cacheShard);
+        Uuid fooId = Uuid.randomUuid();
+        Uuid barId = Uuid.randomUuid();
+        Map<Uuid, String> topicNames = Map.of(fooId, "foo", barId, "bar");
+        TopicIdPartition foo0 = new TopicIdPartition(fooId, new TopicPartition("foo", 0));
+        TopicIdPartition bar0 = new TopicIdPartition(barId, new TopicPartition("bar", 0));
+
+        FetchContext context = newContext(fetchManager,
+            createRequest(INITIAL, fetchData(foo0, bar0), List.of(), isFollower, FETCH.latestVersion()), topicNames);
+        assertInstanceOf(FullFetchContext.class, context);
+
+        LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> respData = new LinkedHashMap<>();
+        respData.put(foo0, isFollower ? errorResponse(Errors.TOPIC_AUTHORIZATION_FAILED.code()) : successResponse(0));
+        respData.put(bar0, errorResponse(Errors.TOPIC_AUTHORIZATION_FAILED.code()));
+        FetchResponse response = context.updateAndGenerateResponseData(respData, List.of());
+
+        assertEquals(Errors.NONE, response.error());
+        assertEquals(INVALID_SESSION_ID, response.sessionId());
+        assertEquals(2, response.responseData(topicNames, FETCH.latestVersion()).size());
+        assertEquals(0, cacheShard.size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testIncrementalFetchWithNewUnauthorizedPartitionClosesSession(boolean throttled) {
+        FetchSessionCacheShard cacheShard = new FetchSessionCacheShard(10, 1000, Integer.MAX_VALUE, 0);
+        FetchManager fetchManager = new FetchManager(new MockTime(), cacheShard);
+        Uuid fooId = Uuid.randomUuid();
+        Uuid barId = Uuid.randomUuid();
+        Map<Uuid, String> topicNames = Map.of(fooId, "foo", barId, "bar");
+        TopicIdPartition foo0 = new TopicIdPartition(fooId, new TopicPartition("foo", 0));
+        TopicIdPartition bar0 = new TopicIdPartition(barId, new TopicPartition("bar", 0));
+        int sessionId = createSession(fetchManager, foo0, false, topicNames);
+
+        FetchContext context = newContext(fetchManager,
+            createRequest(new FetchMetadata(sessionId, 1), fetchData(bar0), List.of(), false, FETCH.latestVersion()), topicNames);
+        assertInstanceOf(IncrementalFetchContext.class, context);
+
+        LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> respData = new LinkedHashMap<>();
+        respData.put(foo0, successResponse(0));
+        respData.put(bar0, errorResponse(Errors.TOPIC_AUTHORIZATION_FAILED.code()));
+        int quotaResponseSize = context.getResponseSize(respData, FETCH.latestVersion());
+        FetchResponse response = throttled
+            ? context.getThrottledResponse(100, respData, List.of())
+            : context.updateAndGenerateResponseData(respData, List.of());
+
+        assertEquals(Errors.NONE, response.error());
+        assertEquals(INVALID_SESSION_ID, response.sessionId());
+        assertTrue(cacheShard.get(sessionId).isEmpty());
+        if (throttled) {
+            assertEquals(100, response.throttleTimeMs());
+            assertEquals(0, response.responseData(topicNames, FETCH.latestVersion()).size());
+        } else {
+            assertEquals(quotaResponseSize, FetchResponse.sizeOf(FETCH.latestVersion(), respData.entrySet().iterator()));
+        }
+    }
+
+    @Test
+    public void testIncrementalFetchClosesSessionWhenCachedPartitionLosesAuthorization() {
+        FetchSessionCacheShard cacheShard = new FetchSessionCacheShard(10, 1000, Integer.MAX_VALUE, 0);
+        FetchManager fetchManager = new FetchManager(new MockTime(), cacheShard);
+        Uuid fooId = Uuid.randomUuid();
+        Map<Uuid, String> topicNames = Map.of(fooId, "foo");
+        TopicIdPartition foo0 = new TopicIdPartition(fooId, new TopicPartition("foo", 0));
+        int sessionId = createSession(fetchManager, foo0, false, topicNames);
+
+        FetchContext context = newContext(fetchManager,
+            createRequest(new FetchMetadata(sessionId, 1), new LinkedHashMap<>(), List.of(), false, FETCH.latestVersion()), topicNames);
+        assertInstanceOf(IncrementalFetchContext.class, context);
+
+        LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> respData = new LinkedHashMap<>();
+        respData.put(foo0, errorResponse(Errors.TOPIC_AUTHORIZATION_FAILED.code()));
+        FetchResponse response = context.updateAndGenerateResponseData(respData, List.of());
+
+        assertEquals(INVALID_SESSION_ID, response.sessionId());
+        assertTrue(cacheShard.get(sessionId).isEmpty());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"UNKNOWN_TOPIC_ID, false", "UNKNOWN_TOPIC_ID, true", "UNKNOWN_TOPIC_OR_PARTITION, false", "UNKNOWN_TOPIC_OR_PARTITION, true"})
+    public void testFullFetchWithUnknownPartitionCreatesSessionOnlyForFollower(Errors error, boolean isFollower) {
+        FetchSessionCacheShard cacheShard = new FetchSessionCacheShard(10, 1000, Integer.MAX_VALUE, 0);
+        FetchManager fetchManager = new FetchManager(new MockTime(), cacheShard);
+        Uuid fooId = Uuid.randomUuid();
+        Map<Uuid, String> topicNames = Map.of(fooId, "foo");
+        TopicIdPartition foo0 = new TopicIdPartition(fooId, new TopicPartition("foo", 0));
+        TopicIdPartition foo1 = new TopicIdPartition(fooId, new TopicPartition("foo", 1));
+
+        FetchContext context = newContext(fetchManager,
+            createRequest(INITIAL, fetchData(foo0, foo1), List.of(), isFollower, FETCH.latestVersion()), topicNames);
+        assertInstanceOf(FullFetchContext.class, context);
+
+        LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> respData = new LinkedHashMap<>();
+        respData.put(foo0, successResponse(0));
+        respData.put(foo1, errorResponse(error.code()));
+        FetchResponse response = context.updateAndGenerateResponseData(respData, List.of());
+
+        assertEquals(isFollower, response.sessionId() != INVALID_SESSION_ID);
+        assertEquals(isFollower ? 1 : 0, cacheShard.size());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"UNKNOWN_TOPIC_ID, false", "UNKNOWN_TOPIC_ID, true", "UNKNOWN_TOPIC_OR_PARTITION, false", "UNKNOWN_TOPIC_OR_PARTITION, true"})
+    public void testIncrementalFetchWithNewUnknownPartitionClosesSessionOnlyForConsumer(Errors error, boolean isFollower) {
+        FetchSessionCacheShard cacheShard = new FetchSessionCacheShard(10, 1000, Integer.MAX_VALUE, 0);
+        FetchManager fetchManager = new FetchManager(new MockTime(), cacheShard);
+        Uuid fooId = Uuid.randomUuid();
+        Map<Uuid, String> topicNames = Map.of(fooId, "foo");
+        TopicIdPartition foo0 = new TopicIdPartition(fooId, new TopicPartition("foo", 0));
+        TopicIdPartition foo1 = new TopicIdPartition(fooId, new TopicPartition("foo", 1));
+        int sessionId = createSession(fetchManager, foo0, isFollower, topicNames);
+
+        FetchContext context = newContext(fetchManager,
+            createRequest(new FetchMetadata(sessionId, 1), fetchData(foo1), List.of(), isFollower, FETCH.latestVersion()), topicNames);
+        assertInstanceOf(IncrementalFetchContext.class, context);
+
+        LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> respData = new LinkedHashMap<>();
+        respData.put(foo1, errorResponse(error.code()));
+        FetchResponse response = context.updateAndGenerateResponseData(respData, List.of());
+
+        assertEquals(isFollower ? sessionId : INVALID_SESSION_ID, response.sessionId());
+        assertEquals(isFollower, cacheShard.get(sessionId).isPresent());
+    }
+
+    @Test
+    public void testEmptyFollowerFullFetchCreatesNoSession() {
+        FetchSessionCacheShard cacheShard = new FetchSessionCacheShard(1, 1000, Integer.MAX_VALUE, 0);
+        FetchManager fetchManager = new FetchManager(new MockTime(), cacheShard);
+        Uuid fooId = Uuid.randomUuid();
+        Map<Uuid, String> topicNames = Map.of(fooId, "foo");
+        TopicIdPartition foo0 = new TopicIdPartition(fooId, new TopicPartition("foo", 0));
+        int consumerSessionId = createSession(fetchManager, foo0, false, topicNames);
+        assertNotEquals(INVALID_SESSION_ID, consumerSessionId);
+
+        FetchContext context = newContext(fetchManager,
+            createRequest(INITIAL, new LinkedHashMap<>(), List.of(), true, FETCH.latestVersion()), topicNames);
+        assertInstanceOf(FullFetchContext.class, context);
+        FetchResponse response = context.updateAndGenerateResponseData(new LinkedHashMap<>(), List.of());
+
+        assertEquals(INVALID_SESSION_ID, response.sessionId());
+        assertCacheContains(cacheShard, consumerSessionId);
+    }
+
+    private int createSession(FetchManager fetchManager,
+                              TopicIdPartition partition,
+                              boolean isFromFollower,
+                              Map<Uuid, String> topicNames) {
+        FetchContext context = newContext(fetchManager,
+            createRequest(INITIAL, fetchData(partition), List.of(), isFromFollower, FETCH.latestVersion()), topicNames);
+        LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> respData = new LinkedHashMap<>();
+        respData.put(partition, successResponse(partition.partition()));
+        return context.updateAndGenerateResponseData(respData, List.of()).sessionId();
+    }
+
+    private LinkedHashMap<TopicPartition, PartitionData> fetchData(TopicIdPartition... partitions) {
+        LinkedHashMap<TopicPartition, PartitionData> data = new LinkedHashMap<>();
+        for (TopicIdPartition partition : partitions) {
+            data.put(partition.topicPartition(), new PartitionData(partition.topicId(), 0, 0, 100, Optional.empty()));
+        }
+        return data;
+    }
+
+    private FetchResponseData.PartitionData successResponse(int partition) {
+        return new FetchResponseData.PartitionData()
+            .setPartitionIndex(partition)
+            .setHighWatermark(100)
+            .setLastStableOffset(100)
+            .setLogStartOffset(100);
+    }
+
     private void assertCacheContains(FetchSessionCacheShard cacheShard, int... sessionIds) {
         int i = 0;
         for (int sessionId : sessionIds) {
@@ -1611,7 +1786,7 @@ public class FetchSessionTest {
             )
         );
 
-        FetchRequest fetchRequest = createRequest(metadata, data, List.of(), false, FETCH.latestVersion());
+        FetchRequest fetchRequest = createRequest(metadata, data, List.of(), true, FETCH.latestVersion());
 
         return fetchManager.newContext(
             fetchRequest.version(),
@@ -1637,7 +1812,7 @@ public class FetchSessionTest {
             )
         );
 
-        FetchRequest fetchRequest = createRequest(metadata, data, toForget, false, FETCH.latestVersion());
+        FetchRequest fetchRequest = createRequest(metadata, data, toForget, true, FETCH.latestVersion());
 
         return fetchManager.newContext(
             fetchRequest.version(),
