@@ -469,7 +469,8 @@ class BrokerServer(
           shardNum
         ))
       }
-      val fetchManager = new FetchManager(Time.SYSTEM, new FetchSessionCache(fetchSessionCacheShards))
+      val fetchManager = new FetchManager(Time.SYSTEM, new FetchSessionCache(fetchSessionCacheShards),
+        config.maxPartitionsPerFetchSession)
 
       sharePartitionManager = new SharePartitionManager(
         replicaManager,

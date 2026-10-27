@@ -111,6 +111,13 @@ public class ServerConfigs {
     public static final int MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS_DEFAULT = 1000;
     public static final String MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS_DOC = "The maximum number of total incremental fetch sessions that we will maintain. FetchSessionCache is sharded into 8 shards and the limit is equally divided among all shards. Sessions are allocated to each shard in round-robin. Only entries within a shard are considered eligible for eviction.";
 
+    public static final String MAX_PARTITIONS_PER_FETCH_SESSION_CONFIG = "max.partitions.per.fetch.session";
+    public static final int MAX_PARTITIONS_PER_FETCH_SESSION_DEFAULT = 10000;
+    public static final String MAX_PARTITIONS_PER_FETCH_SESSION_DOC = "The maximum number of partitions a single incremental fetch session may cache. " +
+        "Full fetch requests with more partitions, and incremental fetch requests that would grow a session beyond it, are served without a session " +
+        "instead of being rejected. Replica fetchers whose partitions from one leader exceed this limit lose incremental fetch " +
+        "sessions entirely, so raise it (or num.replica.fetchers) on brokers with very large per-leader partition counts.";
+
     public static final String FETCH_MAX_BYTES_CONFIG = "fetch.max.bytes";
     public static final int FETCH_MAX_BYTES_DEFAULT = 55 * 1024 * 1024;
     public static final String FETCH_MAX_BYTES_DOC = "The maximum number of bytes we will return for a fetch request. Must be at least 1024.";
@@ -159,6 +166,7 @@ public class ServerConfigs {
             .define(COMPRESSION_ZSTD_LEVEL_CONFIG, INT, CompressionType.ZSTD.defaultLevel(), CompressionType.ZSTD.levelValidator(), MEDIUM, COMPRESSION_ZSTD_LEVEL_DOC)
             /** ********* Fetch Configuration **************/
             .define(MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS_CONFIG, INT, MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS_DEFAULT, atLeast(0), MEDIUM, MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS_DOC)
+            .define(MAX_PARTITIONS_PER_FETCH_SESSION_CONFIG, INT, MAX_PARTITIONS_PER_FETCH_SESSION_DEFAULT, atLeast(1), MEDIUM, MAX_PARTITIONS_PER_FETCH_SESSION_DOC)
             .define(FETCH_MAX_BYTES_CONFIG, INT, FETCH_MAX_BYTES_DEFAULT, atLeast(1024), MEDIUM, FETCH_MAX_BYTES_DOC)
 
             /** ********* Request Limit Configuration ***********/
