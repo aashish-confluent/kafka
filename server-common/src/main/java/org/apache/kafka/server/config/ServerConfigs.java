@@ -171,10 +171,10 @@ public class ServerConfigs {
 
             /** ********* Request Limit Configuration ***********/
             .define(MAX_REQUEST_PARTITION_SIZE_LIMIT_CONFIG, INT, MAX_REQUEST_PARTITION_SIZE_LIMIT_DEFAULT, atLeast(1), MEDIUM, MAX_REQUEST_PARTITION_SIZE_LIMIT_DOC)
+            .define(MESSAGE_MAX_ARRAY_LENGTH_CONFIG, INT, MESSAGE_MAX_ARRAY_LENGTH_DEFAULT, atLeast(1), LOW, MESSAGE_MAX_ARRAY_LENGTH_DOC)
             /** Internal Configurations **/
             // This indicates whether unreleased APIs should be advertised by this node.
             .defineInternal(UNSTABLE_API_VERSIONS_ENABLE_CONFIG, BOOLEAN, false, HIGH)
             // This indicates whether unreleased MetadataVersions should be enabled on this node.
-            .defineInternal(UNSTABLE_FEATURE_VERSIONS_ENABLE_CONFIG, BOOLEAN, false, HIGH)
-            .defineInternal(MESSAGE_MAX_ARRAY_LENGTH_CONFIG, INT, MESSAGE_MAX_ARRAY_LENGTH_DEFAULT, atLeast(1), LOW, MESSAGE_MAX_ARRAY_LENGTH_DOC);
+            .defineInternal(UNSTABLE_FEATURE_VERSIONS_ENABLE_CONFIG, BOOLEAN, false, HIGH);
 }
