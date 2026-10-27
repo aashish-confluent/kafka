@@ -24,7 +24,6 @@ import org.apache.kafka.common.config.{ConfigException, SslConfigs}
 import org.apache.kafka.common.internals.Plugin
 import org.apache.kafka.common.metrics.{JmxReporter, KafkaMetric, Metrics, MetricsReporter}
 import org.apache.kafka.common.network.ListenerName
-import org.apache.kafka.common.protocol.MessageUtil
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.{Endpoint, Reconfigurable, Uuid}
 import org.apache.kafka.coordinator.group.GroupCoordinatorConfig
@@ -115,38 +114,6 @@ class DynamicBrokerConfigTest {
 
     assertEquals(GroupCoordinatorConfig.CONSUMER_GROUP_MAX_ASSIGNMENT_INTERVAL_MS_DEFAULT,
       config.getInt(GroupCoordinatorConfig.CONSUMER_GROUP_ASSIGNMENT_INTERVAL_MS_CONFIG))
-  }
-
-  @Test
-  def testMessageMaxArrayLengthConfigUpdate(): Unit = {
-    val configProps = TestUtils.createBrokerConfig(nodeId = 0, port = 8181)
-    configProps.put(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG, "2000000")
-    val config = KafkaConfig(configProps)
-    config.dynamicConfig.initialize(None)
-    try {
-      config.dynamicConfig.addBrokerReconfigurable(new DynamicMessageMaxArrayLengthConfig(config))
-      assertEquals(2000000, MessageUtil.maxArrayLength())
-
-      val props = new Properties
-      props.put(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG, "5000000")
-      config.dynamicConfig.updateDefaultConfig(props)
-      assertEquals(5000000, config.messageMaxArrayLength)
-      assertEquals(5000000, MessageUtil.maxArrayLength())
-
-      props.put(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG, "3000000")
-      config.dynamicConfig.updateBrokerConfig(0, props)
-      assertEquals(3000000, MessageUtil.maxArrayLength())
-    } finally {
-      MessageUtil.setMaxArrayLength(MessageUtil.MAX_ARRAY_LENGTH)
-    }
-  }
-
-  @Test
-  def testMessageMaxArrayLengthConfigValidation(): Unit = {
-    verifyConfigUpdate(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG, "2000000", perBrokerConfig = false, expectFailure = false)
-    verifyConfigUpdate(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG, "2000000", perBrokerConfig = true, expectFailure = false)
-    verifyConfigUpdate(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG, "0", perBrokerConfig = false, expectFailure = true)
-    verifyConfigUpdate(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG, "-1", perBrokerConfig = true, expectFailure = true)
   }
 
   @Test

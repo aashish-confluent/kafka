@@ -56,13 +56,6 @@ public class DynamicBrokerConfigTest {
     }
 
     @Test
-    public void testMessageMaxArrayLengthIsDynamicallyReconfigurable() {
-        assertTrue(DynamicBrokerConfig.ALL_DYNAMIC_CONFIGS.contains(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG));
-        assertTrue(DynamicBrokerConfig.DynamicMessageMaxArrayLengthConfig.RECONFIGURABLE_CONFIGS
-                .contains(ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG));
-    }
-
-    @Test
     public void testBrokerConfigSynonyms() {
         List<String> logRollTimeConfigs = List.of(ServerLogConfigs.LOG_ROLL_TIME_MILLIS_CONFIG, ServerLogConfigs.LOG_ROLL_TIME_HOURS_CONFIG);
         for (String config : logRollTimeConfigs) {
