@@ -30,6 +30,7 @@ import org.apache.kafka.common.config.{ConfigDef, ConfigException, ConfigResourc
 import org.apache.kafka.common.metadata.{ConfigRecord, MetadataRecordType}
 import org.apache.kafka.common.metrics.{Metrics, MetricsReporter}
 import org.apache.kafka.common.network.{ListenerName, ListenerReconfigurable}
+import org.apache.kafka.common.protocol.MessageUtil
 import org.apache.kafka.common.security.authenticator.LoginManager
 import org.apache.kafka.common.utils.internals.LogContext
 import org.apache.kafka.common.utils.internals.BufferSupplier
@@ -201,6 +202,7 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     addBrokerReconfigurable(new DynamicProducerStateManagerConfig(kafkaServer.logManager.producerStateManagerConfig))
     addBrokerReconfigurable(new DynamicRemoteLogConfig(kafkaServer))
     addBrokerReconfigurable(new DynamicClusterMirrorConfig(() => kafkaServer.config))
+    addBrokerReconfigurable(new DynamicMessageMaxArrayLengthConfig(kafkaServer.config))
   }
 
   /**
@@ -221,6 +223,7 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     }
     addReconfigurable(new DynamicClientQuotaCallback(controller.quotaManagers, controller.config))
     addBrokerReconfigurable(new ControllerDynamicThreadPool(controller))
+    addBrokerReconfigurable(new DynamicMessageMaxArrayLengthConfig(controller.config))
     // TODO: addBrokerReconfigurable(new DynamicListenerConfig(controller))
     addBrokerReconfigurable(controller.socketServer)
   }
@@ -889,5 +892,20 @@ class DynamicRemoteLogConfig(server: KafkaBroker) extends BrokerReconfigurable w
         config.getLong(name)
       case n => throw new IllegalStateException(s"Unexpected dynamic remote log manager config $n")
     }
+  }
+}
+
+class DynamicMessageMaxArrayLengthConfig(initialConfig: KafkaConfig) extends BrokerReconfigurable with Logging {
+  MessageUtil.setMaxArrayLength(initialConfig.messageMaxArrayLength)
+
+  override def reconfigurableConfigs: util.Set[String] = JDynamicBrokerConfig.DynamicMessageMaxArrayLengthConfig.RECONFIGURABLE_CONFIGS
+
+  override def validateReconfiguration(newConfig: KafkaConfig): Unit = {
+    // Validation is already done by KafkaConfig.
+  }
+
+  override def reconfigure(oldConfig: KafkaConfig, newConfig: KafkaConfig): Unit = {
+    MessageUtil.setMaxArrayLength(newConfig.messageMaxArrayLength)
+    info(s"Updated ${ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG} from ${oldConfig.messageMaxArrayLength} to ${newConfig.messageMaxArrayLength}")
   }
 }

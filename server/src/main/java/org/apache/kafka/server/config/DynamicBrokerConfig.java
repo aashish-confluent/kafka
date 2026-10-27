@@ -86,7 +86,8 @@ public class DynamicBrokerConfig {
             GroupCoordinatorConfig.RECONFIGURABLE_CONFIGS,
             DynamicClusterMirrorConfig.RECONFIGURABLE_CONFIGS,
             DynamicQuotaConfig.RECONFIGURABLE_CONFIGS,
-            ShareCoordinatorConfig.RECONFIGURABLE_CONFIGS)
+            ShareCoordinatorConfig.RECONFIGURABLE_CONFIGS,
+            DynamicMessageMaxArrayLengthConfig.RECONFIGURABLE_CONFIGS)
         .flatMap(Collection::stream)
         .collect(Collectors.toUnmodifiableSet());
 
@@ -282,6 +283,11 @@ public class DynamicBrokerConfig {
 
     public static class DynamicQuotaConfig {
         public static final Set<String> RECONFIGURABLE_CONFIGS = QuotaConfig.BROKER_QUOTA_CONFIGS;
+    }
+
+    public static class DynamicMessageMaxArrayLengthConfig {
+        public static final Set<String> RECONFIGURABLE_CONFIGS = Set.of(
+                ServerConfigs.MESSAGE_MAX_ARRAY_LENGTH_CONFIG);
     }
 
     public static class DynamicClusterMirrorConfig implements BrokerReconfigurable {
