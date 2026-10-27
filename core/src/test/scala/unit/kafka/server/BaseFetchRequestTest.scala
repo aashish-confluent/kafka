@@ -22,7 +22,7 @@ import org.apache.kafka.common.config.TopicConfig
 import org.apache.kafka.common.{TopicPartition, Uuid}
 import org.apache.kafka.common.message.FetchResponseData
 import org.apache.kafka.common.record.internal.Record
-import org.apache.kafka.common.requests.{FetchRequest, FetchResponse}
+import org.apache.kafka.common.requests.{FetchMetadata, FetchRequest, FetchResponse}
 import org.apache.kafka.common.serialization.StringSerializer
 import org.apache.kafka.server.config.ServerConfigs
 import org.junit.jupiter.api.AfterEach
@@ -55,11 +55,13 @@ class BaseFetchRequestTest extends BaseRequestTest {
     version: Short,
     maxWaitMs: Int = Int.MaxValue,
     minBytes: Int = 0,
-    rackId: String = ""
+    rackId: String = "",
+    metadata: FetchMetadata = FetchMetadata.LEGACY
   ): FetchRequest = {
     FetchRequest.Builder.forConsumer(version, maxWaitMs, minBytes, createPartitionMap(maxPartitionBytes, topicPartitions, offsetMap))
       .setMaxBytes(maxResponseBytes)
       .rackId(rackId)
+      .metadata(metadata)
       .build()
   }
 

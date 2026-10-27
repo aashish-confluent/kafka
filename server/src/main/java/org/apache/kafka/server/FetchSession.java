@@ -17,6 +17,7 @@
 package org.apache.kafka.server;
 
 import org.apache.kafka.common.TopicIdPartition;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.message.FetchResponseData;
 import org.apache.kafka.common.protocol.Errors;
@@ -28,6 +29,7 @@ import org.apache.kafka.server.metrics.KafkaMetricsGroup;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,6 +45,7 @@ public class FetchSession {
     static final String NUM_INCREMENTAL_FETCH_SESSIONS = "NumIncrementalFetchSessions";
     static final String NUM_INCREMENTAL_FETCH_PARTITIONS_CACHED = "NumIncrementalFetchPartitionsCached";
     static final String INCREMENTAL_FETCH_SESSIONS_EVICTIONS_PER_SEC = "IncrementalFetchSessionEvictionsPerSec";
+    static final String FETCH_SESSION_PARTITION_LIMIT_EXCEEDED_PER_SEC = "FetchSessionPartitionLimitExceededPerSec";
     static final String EVICTIONS = "evictions";
 
     /**
@@ -158,6 +161,17 @@ public class FetchSession {
     synchronized Optional<Long> getFetchOffset(TopicIdPartition topicIdPartition) {
         return Optional.ofNullable(partitionMap.find(new CachedPartition(topicIdPartition)))
             .map(partition -> partition.fetchOffset);
+    }
+
+    // Copy the cached partitions into fetch data for a sessionless fetch.
+    synchronized Map<TopicIdPartition, FetchRequest.PartitionData> toSessionlessFetchData(Map<Uuid, String> topicNames) {
+        Map<TopicIdPartition, FetchRequest.PartitionData> fetchData = new LinkedHashMap<>();
+        partitionMap.forEach(part -> {
+            if (usesTopicIds)
+                part.maybeResolveUnknownName(topicNames);
+            fetchData.put(new TopicIdPartition(part.topicId(), new TopicPartition(part.topic(), part.partition())), part.reqData());
+        });
+        return fetchData;
     }
 
     // Update the cached partition data based on the request.
