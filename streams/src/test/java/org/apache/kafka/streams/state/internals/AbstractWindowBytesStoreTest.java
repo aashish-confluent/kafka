@@ -19,6 +19,7 @@ package org.apache.kafka.streams.state.internals;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.serialization.Serde;
@@ -1187,5 +1188,13 @@ public abstract class AbstractWindowBytesStoreTest {
 
     private ProcessorRecordContext createRecordContext(final long time) {
         return new ProcessorRecordContext(time, 0, 0, "topic", new RecordHeaders());
+    }
+
+    @Test
+    public void shouldThrowOnRestoreOfTooShortKey() {
+        assertThrows(
+            SerializationException.class,
+            () -> context.restore(windowStore.name(), List.of(KeyValue.pair(new byte[4], new byte[] {1})))
+        );
     }
 }

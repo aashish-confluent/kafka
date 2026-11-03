@@ -20,6 +20,7 @@ package org.apache.kafka.streams.state.internals;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.serialization.IntegerSerializer;
@@ -1058,5 +1059,13 @@ public abstract class AbstractSessionBytesStoreTest {
         ) {
             assertEquals(valuesToSet(iterator), Set.of(2L, 3L, 4L));
         }
+    }
+
+    @Test
+    public void shouldThrowOnRestoreOfTooShortKey() {
+        assertThrows(
+            SerializationException.class,
+            () -> context.restore(sessionStore.name(), List.of(KeyValue.pair(new byte[4], new byte[] {1})))
+        );
     }
 }

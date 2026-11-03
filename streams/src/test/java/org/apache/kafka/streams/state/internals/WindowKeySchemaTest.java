@@ -17,6 +17,7 @@
 
 package org.apache.kafka.streams.state.internals;
 
+import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Serde;
@@ -34,8 +35,10 @@ import org.apache.kafka.streams.state.internals.PrefixedWindowKeySchemas.TimeFir
 import org.apache.kafka.streams.state.internals.SegmentedBytesStore.KeySchema;
 import org.apache.kafka.test.KeyValueIteratorStub;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -50,6 +53,7 @@ import static org.apache.kafka.common.utils.Utils.mkMap;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class WindowKeySchemaTest {
@@ -514,5 +518,40 @@ public class WindowKeySchemaTest {
             assertEquals(startTime, timestamp);
             assertEquals(Bytes.wrap(key.getBytes()), Bytes.wrap(rawkey));
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 4, 11})
+    public void shouldThrowOnTooShortStoreKey(final int length) {
+        final byte[] storeKey = new byte[length];
+        assertThrows(SerializationException.class, () -> WindowKeySchema.extractStoreKeyBytes(storeKey));
+        assertThrows(SerializationException.class, () -> WindowKeySchema.extractStoreTimestamp(storeKey));
+        assertThrows(SerializationException.class, () -> WindowKeySchema.extractStoreSequence(storeKey));
+        assertThrows(SerializationException.class, () -> WindowKeySchema.extractStoreWindow(storeKey, 10L));
+        assertThrows(SerializationException.class, () -> WindowKeySchema.fromStoreBytesKey(storeKey, 10L));
+        final SerializationException exception = assertThrows(
+            SerializationException.class,
+            () -> WindowKeySchema.fromStoreKey(storeKey, 10L, Serdes.ByteArray().deserializer(), new RecordHeaders(), "topic")
+        );
+        assertEquals("Invalid window key: expected at least 12 bytes, but got " + length, exception.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 4, 7})
+    public void shouldThrowOnTooShortWindowedKey(final int length) {
+        final SerializationException exception = assertThrows(
+            SerializationException.class,
+            () -> WindowKeySchema.from(new byte[length], 10L, Serdes.ByteArray().deserializer(), new RecordHeaders(), "topic")
+        );
+        assertEquals("Invalid window key: expected at least 8 bytes, but got " + length, exception.getMessage());
+    }
+
+    @Test
+    public void shouldExtractStoreKeyWithEmptyKeyBytes() {
+        final byte[] storeKey = WindowKeySchema.toStoreKeyBinary(Bytes.wrap(new byte[0]), 5L, 3).get();
+        assertEquals(12, storeKey.length);
+        assertArrayEquals(new byte[0], WindowKeySchema.extractStoreKeyBytes(storeKey));
+        assertEquals(5L, WindowKeySchema.extractStoreTimestamp(storeKey));
+        assertEquals(3, WindowKeySchema.extractStoreSequence(storeKey));
     }
 }

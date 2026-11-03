@@ -17,6 +17,7 @@
 
 package org.apache.kafka.streams.state.internals;
 
+import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -35,8 +36,11 @@ import org.apache.kafka.streams.state.internals.SegmentedBytesStore.KeySchema;
 import org.apache.kafka.test.KeyValueIteratorStub;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,6 +53,7 @@ import static org.apache.kafka.common.utils.Utils.mkMap;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SessionKeySchemaTest {
@@ -376,4 +381,41 @@ public class SessionKeySchemaTest {
         return results;
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {0, 4, 15})
+    public void shouldThrowOnTooShortSessionKey(final int length) {
+        final byte[] sessionKey = new byte[length];
+        assertThrows(SerializationException.class, () -> SessionKeySchema.extractKeyBytes(sessionKey));
+        assertThrows(SerializationException.class, () -> SessionKeySchema.extractEndTimestamp(sessionKey));
+        assertThrows(SerializationException.class, () -> SessionKeySchema.extractStartTimestamp(sessionKey));
+        assertThrows(SerializationException.class, () -> SessionKeySchema.extractWindow(sessionKey));
+        final SerializationException exception = assertThrows(
+            SerializationException.class,
+            () -> SessionKeySchema.from(Bytes.wrap(sessionKey))
+        );
+        assertEquals("Invalid session key: expected at least 16 bytes, but got " + length, exception.getMessage());
+    }
+
+    @Test
+    public void shouldExtractSessionKeyWithEmptyKeyBytes() {
+        final byte[] sessionKey = SessionKeySchema.toBinary(Bytes.wrap(new byte[0]), 1L, 2L).get();
+        assertEquals(16, sessionKey.length);
+        assertArrayEquals(new byte[0], SessionKeySchema.extractKeyBytes(sessionKey));
+        assertEquals(1L, SessionKeySchema.extractStartTimestamp(sessionKey));
+        assertEquals(2L, SessionKeySchema.extractEndTimestamp(sessionKey));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"-1, 5", "10, 5"})
+    public void shouldThrowOnInvalidSessionWindowInKey(final long start, final long end) {
+        final byte[] sessionKey = SessionKeySchema.toBinary(Bytes.wrap(new byte[] {1}), start, end).get();
+        final SerializationException exception = assertThrows(
+            SerializationException.class,
+            () -> SessionKeySchema.from(Bytes.wrap(sessionKey))
+        );
+        assertEquals(
+            "Invalid session key: window start " + start + " and end " + end + " do not form a valid session window",
+            exception.getMessage()
+        );
+    }
 }
