@@ -2287,6 +2287,35 @@ class AuthorizerIntegrationTest extends AbstractAuthorizerIntegrationTest {
     JTestUtils.assertFutureThrows(classOf[GroupIdNotFoundException], result.describedGroups().get(group))
   }
 
+  private def createClassicGroupToDescribe(): Unit = {
+    createTopicWithBrokerPrincipal(topic)
+    addAndVerifyAcls(Set(new AccessControlEntry(clientPrincipalString, WILDCARD_HOST, READ, ALLOW)), groupResource)
+    addAndVerifyAcls(Set(new AccessControlEntry(clientPrincipalString, WILDCARD_HOST, READ, ALLOW)), topicResource)
+    consumerConfig.put(ConsumerConfig.GROUP_PROTOCOL_CONFIG, "classic")
+    consumerConfig.put(ConsumerConfig.GROUP_ID_CONFIG, group)
+    val consumer = createConsumer()
+    consumer.subscribe(util.Set.of(topic))
+    TestUtils.pollUntilTrue(consumer, () => !consumer.assignment.isEmpty, "Consumer did not get an assignment")
+    removeAllClientAcls()
+  }
+
+  @Test
+  def testDescribeClassicGroupWithGroupDescribeAndTopicDescribeAcl(): Unit = {
+    createClassicGroupToDescribe()
+    addAndVerifyAcls(groupDescribeAcl(groupResource), groupResource)
+    addAndVerifyAcls(topicDescribeAcl(topicResource), topicResource)
+    val description = createAdminClient().describeConsumerGroups(util.List.of(group)).describedGroups().get(group).get()
+    assertEquals(util.Set.of(tp), description.members.iterator.next.assignment.topicPartitions)
+  }
+
+  @Test
+  def testDescribeClassicGroupWithoutTopicDescribeAcl(): Unit = {
+    createClassicGroupToDescribe()
+    addAndVerifyAcls(groupDescribeAcl(groupResource), groupResource)
+    val result = createAdminClient().describeConsumerGroups(util.List.of(group))
+    JTestUtils.assertFutureThrows(classOf[TopicAuthorizationException], result.describedGroups().get(group))
+  }
+
   @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedGroupProtocolNames)
   @MethodSource(Array("getTestGroupProtocolParametersAll"))
   def testListGroupApiWithAndWithoutListGroupAcls(groupProtocol: String): Unit = {

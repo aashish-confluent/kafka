@@ -26,7 +26,8 @@ import kafka.server.share.SharePartitionManager
 import kafka.utils.{Logging, TestUtils}
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType
 import org.apache.kafka.clients.admin.{AlterConfigOp, ConfigEntry}
-import org.apache.kafka.clients.consumer.AcknowledgeType
+import org.apache.kafka.clients.consumer.{AcknowledgeType, ConsumerPartitionAssignor}
+import org.apache.kafka.clients.consumer.internals.ConsumerProtocol
 import org.apache.kafka.common._
 import org.apache.kafka.common.acl.AclOperation
 import org.apache.kafka.common.compress.Compression
@@ -3913,6 +3914,96 @@ class KafkaApisTest extends Logging {
     future.complete(groupResults)
 
     val expectedDescribeGroupsResponse = new DescribeGroupsResponseData().setGroups(groupResults)
+    val response = verifyNoThrottling[DescribeGroupsResponse](requestChannelRequest)
+    assertEquals(expectedDescribeGroupsResponse, response.data)
+  }
+
+  @ParameterizedTest
+  @ApiKeyVersionsSource(apiKey = ApiKeys.DESCRIBE_GROUPS)
+  def testHandleDescribeGroupsFilterUnauthorizedTopics(version: Short): Unit = {
+    val fooTopicName = "foo"
+    val barTopicName = "bar"
+
+    def subscription(topics: util.List[String], ownedPartitions: util.List[TopicPartition] = util.List.of()): Array[Byte] =
+      Utils.toArray(ConsumerProtocol.serializeSubscription(new ConsumerPartitionAssignor.Subscription(topics, null, ownedPartitions)))
+
+    def assignment(partitions: util.List[TopicPartition]): Array[Byte] =
+      Utils.toArray(ConsumerProtocol.serializeAssignment(new ConsumerPartitionAssignor.Assignment(partitions)))
+
+    def consumerGroup(groupId: String, metadata: Array[Byte], memberAssignment: Array[Byte]): DescribeGroupsResponseData.DescribedGroup =
+      new DescribeGroupsResponseData.DescribedGroup()
+        .setGroupId(groupId)
+        .setGroupState("Stable")
+        .setProtocolType("consumer")
+        .setProtocolData("range")
+        .setMembers(util.List.of(
+          new DescribeGroupsResponseData.DescribedGroupMember()
+            .setMemberId("member")
+            .setMemberMetadata(metadata)
+            .setMemberAssignment(memberAssignment)))
+
+    val groupIds = util.List.of("group-0", "group-1", "group-2", "group-3", "group-4", "group-5", "group-6", "group-7", "group-8")
+    val describeGroupsRequest = new DescribeGroupsRequestData().setGroups(groupIds)
+    val requestChannelRequest = buildRequest(new DescribeGroupsRequest.Builder(describeGroupsRequest).build(version))
+
+    val authorizer: Authorizer = mock(classOf[Authorizer])
+    when(authorizer.authorize(
+      any[RequestContext],
+      any[util.List[Action]]
+    )).thenAnswer { invocation =>
+      val actions = invocation.getArgument(1, classOf[util.List[Action]])
+      actions.stream()
+        .map(action => if (action.resourcePattern.name == barTopicName) AuthorizationResult.DENIED else AuthorizationResult.ALLOWED)
+        .toList
+    }
+
+    val future = new CompletableFuture[util.List[DescribeGroupsResponseData.DescribedGroup]]()
+    when(groupCoordinator.describeGroups(
+      requestChannelRequest.context,
+      groupIds
+    )).thenReturn(future)
+    kafkaApis = createKafkaApis(authorizer = Some(authorizer))
+    kafkaApis.handleDescribeGroupsRequest(requestChannelRequest)
+
+    val fooAssignment = assignment(util.List.of(new TopicPartition(fooTopicName, 0)))
+    val authorizedGroup = consumerGroup("group-0", subscription(util.List.of(fooTopicName)), fooAssignment)
+    val connectGroup = consumerGroup("group-4", "bar".getBytes, "bar".getBytes).setProtocolType("connect")
+    val emptyMemberGroup = consumerGroup("group-8", Array.emptyByteArray, Array.emptyByteArray).setGroupState("PreparingRebalance")
+    val failedGroup = new DescribeGroupsResponseData.DescribedGroup()
+      .setGroupId("group-6")
+      .setErrorCode(Errors.NOT_COORDINATOR.code)
+
+    future.complete(util.List.of(
+      authorizedGroup,
+      consumerGroup("group-1", subscription(util.List.of(fooTopicName, barTopicName)), fooAssignment),
+      consumerGroup("group-2", subscription(util.List.of(fooTopicName)), assignment(util.List.of(new TopicPartition(barTopicName, 0)))),
+      consumerGroup("group-3", subscription(util.List.of(fooTopicName), util.List.of(new TopicPartition(barTopicName, 0))), fooAssignment),
+      connectGroup,
+      consumerGroup("group-5", Array[Byte](0, 1), fooAssignment),
+      failedGroup,
+      consumerGroup("group-7", subscription(util.List.of(fooTopicName)), Array[Byte](0, 1)),
+      emptyMemberGroup
+    ))
+
+    def topicAuthorizationFailed(groupId: String): DescribeGroupsResponseData.DescribedGroup =
+      if (version >= 6) {
+        DescribeGroupsResponse.groupError(groupId, Errors.TOPIC_AUTHORIZATION_FAILED,
+          "The group has described topic(s) that the client is not authorized to describe.")
+      } else {
+        DescribeGroupsResponse.groupError(groupId, Errors.TOPIC_AUTHORIZATION_FAILED)
+      }
+
+    val expectedDescribeGroupsResponse = new DescribeGroupsResponseData().setGroups(util.List.of(
+      authorizedGroup,
+      topicAuthorizationFailed("group-1"),
+      topicAuthorizationFailed("group-2"),
+      topicAuthorizationFailed("group-3"),
+      connectGroup,
+      topicAuthorizationFailed("group-5"),
+      failedGroup,
+      topicAuthorizationFailed("group-7"),
+      emptyMemberGroup
+    ))
     val response = verifyNoThrottling[DescribeGroupsResponse](requestChannelRequest)
     assertEquals(expectedDescribeGroupsResponse, response.data)
   }

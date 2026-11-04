@@ -25,6 +25,7 @@ import kafka.server.share.SharePartitionManager
 import kafka.utils.Logging
 import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.admin.EndpointType
+import org.apache.kafka.clients.consumer.internals.ConsumerProtocol
 import org.apache.kafka.common.acl.AclOperation
 import org.apache.kafka.common.acl.AclOperation._
 import org.apache.kafka.common.config.ConfigResource
@@ -44,6 +45,7 @@ import org.apache.kafka.common.message._
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.{ApiKeys, ApiMessage, Errors}
+import org.apache.kafka.common.protocol.types.SchemaException
 import org.apache.kafka.common.record.internal._
 import org.apache.kafka.common.replica.ClientMetadata
 import org.apache.kafka.common.replica.ClientMetadata.DefaultClientMetadata
@@ -77,6 +79,7 @@ import org.apache.kafka.server.transaction.AddPartitionsToTxnManager
 import org.apache.kafka.storage.internals.log.{AppendOrigin, RecordValidationStats}
 import org.apache.kafka.storage.log.metrics.BrokerTopicStats
 
+import java.nio.ByteBuffer
 import java.util
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{CompletableFuture, ConcurrentHashMap}
@@ -1356,8 +1359,58 @@ class KafkaApis(val requestChannel: RequestChannel,
           response.groups.addAll(results)
         }
 
+        // Clients are not allowed to see topics that are not authorized for Describe.
+        if (authorizerPlugin.isDefined) {
+          val groupsAndTopics = response.groups.asScala.map(group => (group, describedGroupTopics(group)))
+          val authorizedTopics = authHelper.filterByAuthorized(request.context, DESCRIBE, TOPIC,
+            groupsAndTopics.flatMap(_._2.getOrElse(Set.empty)).toSet.asJava, (t: String) => t)
+          response.setGroups(groupsAndTopics.map { case (group, topics) =>
+            if (topics.exists(_.forall(authorizedTopics.contains))) {
+              group
+            } else if (request.header.apiVersion >= 6) {
+              DescribeGroupsResponse.groupError(group.groupId, Errors.TOPIC_AUTHORIZATION_FAILED,
+                "The group has described topic(s) that the client is not authorized to describe.")
+            } else {
+              DescribeGroupsResponse.groupError(group.groupId, Errors.TOPIC_AUTHORIZATION_FAILED)
+            }
+          }.asJava)
+        }
+
         requestHelper.sendMaybeThrottle(request, new DescribeGroupsResponse(response))
       }
+    }
+  }
+
+  private def describedGroupTopics(group: DescribeGroupsResponseData.DescribedGroup): Option[Set[String]] = {
+    if (group.errorCode != Errors.NONE.code || group.protocolType != ConsumerProtocol.PROTOCOL_TYPE) {
+      Some(Set.empty)
+    } else {
+      try {
+        Some(group.members.asScala.flatMap { member =>
+          subscriptionTopics(member.memberMetadata) ++ assignmentTopics(member.memberAssignment)
+        }.toSet)
+      } catch {
+        case e: SchemaException =>
+          debug(s"Failed to parse the member metadata or assignment of group ${group.groupId}", e)
+          None
+      }
+    }
+  }
+
+  private def subscriptionTopics(metadata: Array[Byte]): Set[String] = {
+    if (metadata == null || metadata.isEmpty) {
+      Set.empty
+    } else {
+      val subscription = ConsumerProtocol.deserializeSubscription(ByteBuffer.wrap(metadata))
+      subscription.topics.asScala.toSet ++ subscription.ownedPartitions.asScala.map(_.topic)
+    }
+  }
+
+  private def assignmentTopics(assignment: Array[Byte]): Set[String] = {
+    if (assignment == null || assignment.isEmpty) {
+      Set.empty
+    } else {
+      ConsumerProtocol.deserializeAssignment(ByteBuffer.wrap(assignment)).partitions.asScala.map(_.topic).toSet
     }
   }
 
