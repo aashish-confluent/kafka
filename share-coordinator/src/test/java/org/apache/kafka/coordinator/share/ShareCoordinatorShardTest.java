@@ -61,12 +61,16 @@ import org.apache.kafka.timeline.SnapshotRegistry;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -475,6 +479,75 @@ class ShareCoordinatorShardTest {
 
         assertNull(shard.getShareStateMapValue(SHARE_PARTITION_KEY));
         assertNull(shard.getLeaderMapValue(SHARE_PARTITION_KEY));
+    }
+
+    private static Stream<Arguments> invalidStateBatches() {
+        return Stream.of(
+            Arguments.of(10L, 5L, (short) 1, (byte) 0),
+            Arguments.of(-1L, 5L, (short) 1, (byte) 0),
+            Arguments.of(0L, 5L, (short) -1, (byte) 0),
+            Arguments.of(0L, 5L, (short) 1, (byte) -1),
+            Arguments.of(0L, 5L, (short) 1, (byte) 5)
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidStateBatches")
+    public void testWriteStateInvalidStateBatch(long firstOffset, long lastOffset, short deliveryCount, byte deliveryState) {
+        initSharePartition(shard, SHARE_PARTITION_KEY);
+        ShareGroupOffset initialState = shard.getShareStateMapValue(SHARE_PARTITION_KEY);
+
+        WriteShareGroupStateRequestData request = writeStateRequestWithBatches(List.of(
+            new WriteShareGroupStateRequestData.StateBatch()
+                .setFirstOffset(0)
+                .setLastOffset(3)
+                .setDeliveryCount((short) 1)
+                .setDeliveryState((byte) 0),
+            new WriteShareGroupStateRequestData.StateBatch()
+                .setFirstOffset(firstOffset)
+                .setLastOffset(lastOffset)
+                .setDeliveryCount(deliveryCount)
+                .setDeliveryState(deliveryState)));
+
+        CoordinatorResult<WriteShareGroupStateResponseData, CoordinatorRecord> result = shard.writeState(request);
+
+        WriteShareGroupStateResponseData expectedData = WriteShareGroupStateResponse.toErrorResponseData(
+            TOPIC_ID, PARTITION, Errors.INVALID_REQUEST, ShareCoordinatorShard.INVALID_STATE_BATCH.getMessage());
+
+        assertEquals(expectedData, result.response());
+        assertEquals(List.of(), result.records());
+        assertEquals(initialState, shard.getShareStateMapValue(SHARE_PARTITION_KEY));
+    }
+
+    @Test
+    public void testWriteStateValidStateBatchBoundaries() {
+        initSharePartition(shard, SHARE_PARTITION_KEY);
+
+        WriteShareGroupStateRequestData request = writeStateRequestWithBatches(List.of(
+            new WriteShareGroupStateRequestData.StateBatch()
+                .setFirstOffset(0)
+                .setLastOffset(0)
+                .setDeliveryCount((short) 0)
+                .setDeliveryState((byte) 4)));
+
+        CoordinatorResult<WriteShareGroupStateResponseData, CoordinatorRecord> result = shard.writeState(request);
+
+        assertEquals(WriteShareGroupStateResponse.toResponseData(TOPIC_ID, PARTITION), result.response());
+        assertEquals(1, result.records().size());
+    }
+
+    private static WriteShareGroupStateRequestData writeStateRequestWithBatches(List<WriteShareGroupStateRequestData.StateBatch> stateBatches) {
+        return new WriteShareGroupStateRequestData()
+            .setGroupId(GROUP_ID)
+            .setTopics(List.of(new WriteShareGroupStateRequestData.WriteStateData()
+                .setTopicId(TOPIC_ID)
+                .setPartitions(List.of(new WriteShareGroupStateRequestData.PartitionData()
+                    .setPartition(PARTITION)
+                    .setStartOffset(0)
+                    .setDeliveryCompleteCount(0)
+                    .setStateEpoch(0)
+                    .setLeaderEpoch(0)
+                    .setStateBatches(stateBatches)))));
     }
 
     @Test
