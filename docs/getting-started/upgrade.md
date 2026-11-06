@@ -33,6 +33,7 @@ type: docs
 ### Notable changes in 4.5.0
 
   * `ssl.principal.mapping.rules` now builds the principal name from the same full match that is used to check the rule. Previously, a rule that is not anchored with both `^` and `$`, or that uses alternation, could build the name from a shorter match or apply the replacement twice. For example, `RULE:CN=(.*?),OU=(.*?)/$1/` mapped `CN=bob,OU=eng` to `bobeng` instead of `bob`. Rules anchored with `^` and `$`, such as the documented examples, are not affected. If you use such rules, check that ACLs, quotas and `super.users` refer to the corrected principal names before upgrading.
+  * The broker now fails at startup when OAUTHBEARER is enabled on a listener and `sasl.server.callback.handler.class` is not set for it, instead of using the unsecured validator, which accepts unsigned JWTs. Brokers that previously started without this handler will now fail to start until it is configured. Set `listener.name.<listener name>.oauthbearer.sasl.server.callback.handler.class` to a secure validator such as `org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallbackHandler`. To keep using the unsecured validator in non-production environments, set the new `sasl.oauthbearer.allow.unsecured.validator` config (default `false`) to `true`.
 
 ## Upgrading to 4.4.0
 

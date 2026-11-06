@@ -34,6 +34,9 @@ public class TestSecurityConfig extends AbstractConfig {
             .define(BrokerSecurityConfigs.SASL_SERVER_CALLBACK_HANDLER_CLASS_CONFIG, Type.CLASS,
                     null,
                     Importance.MEDIUM, BrokerSecurityConfigs.SASL_SERVER_CALLBACK_HANDLER_CLASS_DOC)
+            .define(BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG, Type.BOOLEAN,
+                    BrokerSecurityConfigs.DEFAULT_SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR,
+                    Importance.MEDIUM, BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_DOC)
             .define(BrokerSecurityConfigs.PRINCIPAL_BUILDER_CLASS_CONFIG, Type.CLASS,
                     null, Importance.MEDIUM, BrokerSecurityConfigs.PRINCIPAL_BUILDER_CLASS_DOC)
             .define(BrokerSecurityConfigs.CONNECTIONS_MAX_REAUTH_MS_CONFIG, Type.LONG, 0L, Importance.MEDIUM,

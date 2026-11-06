@@ -327,19 +327,26 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
             else if (ScramMechanism.isScram(mechanism))
                 callbackHandler = new ScramServerCallbackHandler(credentialCache.cache(mechanism, ScramCredential.class), tokenCache);
             else if (mechanism.equals(OAuthBearerLoginModule.OAUTHBEARER_MECHANISM))
-                callbackHandler = unsecuredOAuthBearerValidatorCallbackHandler(prefix);
+                callbackHandler = unsecuredOAuthBearerValidatorCallbackHandler(configs, prefix);
             else
                 callbackHandler = new SaslServerCallbackHandler();
             saslCallbackHandlers.put(mechanism, callbackHandler);
         }
     }
 
-    private AuthenticateCallbackHandler unsecuredOAuthBearerValidatorCallbackHandler(String mechanismPrefix) {
+    private AuthenticateCallbackHandler unsecuredOAuthBearerValidatorCallbackHandler(Map<String, ?> configs, String mechanismPrefix) {
         String listenerPrefix = listenerName == null ? "" : listenerName.configPrefix();
+        String callbackHandlerConfig = listenerPrefix + mechanismPrefix + BrokerSecurityConfigs.SASL_SERVER_CALLBACK_HANDLER_CLASS_CONFIG;
+        Boolean allowUnsecuredValidator = (Boolean) configs.get(mechanismPrefix + BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG);
+        if (allowUnsecuredValidator == null)
+            allowUnsecuredValidator = (Boolean) configs.get(BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG);
+        if (!Boolean.TRUE.equals(allowUnsecuredValidator))
+            throw new ConfigException(String.format("OAUTHBEARER is enabled but \"%s\" is not set. Set \"%s\" to a secure validator such as " +
+                "org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallbackHandler, or set \"%s\" to true to use " +
+                "the unsecured validator, which accepts unsigned tokens and must not be used in production.",
+                callbackHandlerConfig, callbackHandlerConfig, BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG));
         log.warn("Using the unsecured OAUTHBEARER validator, which accepts unsigned tokens and must not be used in production, " +
-            "because {} is not set. Set it to a secure validator such as " +
-            "org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallbackHandler.",
-            listenerPrefix + mechanismPrefix + BrokerSecurityConfigs.SASL_SERVER_CALLBACK_HANDLER_CLASS_CONFIG);
+            "because \"{}\" is not set and \"{}\" is true.", callbackHandlerConfig, BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG);
         return new OAuthBearerUnsecuredValidatorCallbackHandler();
     }
 

@@ -18,6 +18,7 @@ package org.apache.kafka.common.network;
 
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs;
@@ -45,6 +46,8 @@ import org.ietf.jgss.GSSName;
 import org.ietf.jgss.Oid;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 import java.lang.reflect.Field;
@@ -60,6 +63,7 @@ import javax.security.auth.login.LoginException;
 import javax.security.auth.spi.LoginModule;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -163,15 +167,40 @@ public class SaslChannelBuilderTest {
     }
 
     @Test
-    public void testUnsecuredOAuthBearerValidatorLogsWarning() {
+    public void testUnsecuredOAuthBearerValidatorNotAllowedByDefault() {
+        SaslChannelBuilder channelBuilder = oAuthBearerServerChannelBuilder();
+        KafkaException e = assertThrows(KafkaException.class, () -> configureOAuthBearerServerChannelBuilder(channelBuilder, new HashMap<>()));
+        assertInstanceOf(ConfigException.class, e.getCause());
+        assertEquals("OAUTHBEARER is enabled but \"listener.name.sasl_plaintext.oauthbearer.sasl.server.callback.handler.class\" is not set. " +
+                "Set \"listener.name.sasl_plaintext.oauthbearer.sasl.server.callback.handler.class\" to a secure validator such as " +
+                "org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallbackHandler, " +
+                "or set \"sasl.oauthbearer.allow.unsecured.validator\" to true to use the unsecured validator, which accepts unsigned tokens " +
+                "and must not be used in production.", e.getCause().getMessage());
+        assertTrue(channelBuilder.loginManagers().isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "oauthbearer."})
+    public void testUnsecuredOAuthBearerValidatorAllowedLogsWarning(String configPrefix) {
+        Map<String, Object> configs = new HashMap<>();
+        configs.put(configPrefix + BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG, true);
         try (LogCaptureAppender appender = LogCaptureAppender.createAndRegister(SaslChannelBuilder.class)) {
             appender.setClassLogger(SaslChannelBuilder.class, Level.WARN);
-            createOAuthBearerServerChannelBuilder(new HashMap<>()).close();
+            createOAuthBearerServerChannelBuilder(configs).close();
             assertEquals(List.of("Using the unsecured OAUTHBEARER validator, which accepts unsigned tokens and must not be used in production, " +
-                    "because listener.name.sasl_plaintext.oauthbearer.sasl.server.callback.handler.class is not set. " +
-                    "Set it to a secure validator such as org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallbackHandler."),
+                    "because \"listener.name.sasl_plaintext.oauthbearer.sasl.server.callback.handler.class\" is not set and " +
+                    "\"sasl.oauthbearer.allow.unsecured.validator\" is true."),
                 appender.getMessages(Level.WARN));
         }
+    }
+
+    @Test
+    public void testMechanismPrefixedAllowUnsecuredValidatorTakesPrecedence() {
+        Map<String, Object> configs = new HashMap<>();
+        configs.put(BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG, true);
+        configs.put("oauthbearer." + BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG, false);
+        KafkaException e = assertThrows(KafkaException.class, () -> createOAuthBearerServerChannelBuilder(configs));
+        assertInstanceOf(ConfigException.class, e.getCause());
     }
 
     @Test
@@ -187,18 +216,26 @@ public class SaslChannelBuilderTest {
     }
 
     private SaslChannelBuilder createOAuthBearerServerChannelBuilder(Map<String, Object> configs) {
+        SaslChannelBuilder channelBuilder = oAuthBearerServerChannelBuilder();
+        configureOAuthBearerServerChannelBuilder(channelBuilder, configs);
+        return channelBuilder;
+    }
+
+    private SaslChannelBuilder oAuthBearerServerChannelBuilder() {
         TestJaasConfig jaasConfig = new TestJaasConfig();
         jaasConfig.addEntry("jaasContext", OAuthBearerLoginModule.class.getName(),
             Collections.singletonMap("unsecuredLoginStringClaim_sub", "admin"));
         JaasContext jaasContext = new JaasContext("jaasContext", JaasContext.Type.SERVER, jaasConfig, null);
-        SaslChannelBuilder channelBuilder = new SaslChannelBuilder(ConnectionMode.SERVER,
+        return new SaslChannelBuilder(ConnectionMode.SERVER,
             Collections.singletonMap(OAuthBearerLoginModule.OAUTHBEARER_MECHANISM, jaasContext), SecurityProtocol.SASL_PLAINTEXT,
             new ListenerName("SASL_PLAINTEXT"), false, OAuthBearerLoginModule.OAUTHBEARER_MECHANISM,
             null, null, null, Time.SYSTEM, new LogContext(), defaultApiVersionsSupplier());
+    }
+
+    private void configureOAuthBearerServerChannelBuilder(SaslChannelBuilder channelBuilder, Map<String, Object> configs) {
         Map<String, Object> allConfigs = new HashMap<>(new TestSecurityConfig(new HashMap<>()).values());
         allConfigs.putAll(configs);
         channelBuilder.configure(allConfigs);
-        return channelBuilder;
     }
 
     private SaslChannelBuilder createGssapiChannelBuilder(Map<String, JaasContext> jaasContexts, GSSManager gssManager) {

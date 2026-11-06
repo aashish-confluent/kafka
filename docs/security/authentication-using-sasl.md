@@ -458,7 +458,10 @@ Set to a positive integer value if you wish to allow up to some number of positi
    security.inter.broker.protocol=SASL_SSL (or SASL_PLAINTEXT if non-production)
    sasl.mechanism.inter.broker.protocol=OAUTHBEARER
    sasl.enabled.mechanisms=OAUTHBEARER
+   sasl.oauthbearer.allow.unsecured.validator=true
    ```
+
+   The broker fails at startup unless `sasl.oauthbearer.allow.unsecured.validator` is set to `true`, since the unsecured validator accepts unsigned tokens.
 
 #### Configuring Production Kafka Brokers
 
@@ -782,7 +785,7 @@ Kafka provides built-in JWT retriever implementations for production use: `Clien
 Production use cases will also require writing an implementation of `org.apache.kafka.common.security.auth.AuthenticateCallbackHandler` that can handle an instance of `org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallback` and declaring it via the `listener.name.sasl_ssl.oauthbearer.sasl.server.callback.handler.class` broker configuration option.
 #### Security Considerations for SASL/OAUTHBEARER
 
-* The default implementation of SASL/OAUTHBEARER in Kafka creates and validates [Unsecured JSON Web Tokens](https://tools.ietf.org/html/rfc7515#appendix-A.5). This is suitable only for non-production use.
+* The default implementation of SASL/OAUTHBEARER in Kafka creates and validates [Unsecured JSON Web Tokens](https://tools.ietf.org/html/rfc7515#appendix-A.5). This is suitable only for non-production use. The broker uses the unsecured validator only when `sasl.oauthbearer.allow.unsecured.validator` is set to `true`.
 * OAUTHBEARER should be used in production environments only with TLS-encryption to prevent interception of tokens.
 * The default unsecured SASL/OAUTHBEARER implementation may be overridden (and must be overridden in production environments) using custom login and SASL Server callback handlers or the built-in JWT retriever implementations as described above.
 * When using client assertion authentication, private keys never leave the client and are not transmitted over the network, unlike client secrets. Use short assertion expiration times (e.g. 300 seconds via `sasl.oauthbearer.assertion.claim.exp.seconds`) and enable JTI inclusion (`sasl.oauthbearer.assertion.claim.jti.include=true`) to protect against replay attacks.

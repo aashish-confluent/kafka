@@ -1813,6 +1813,7 @@ public class SaslAuthenticatorTest {
         SecurityProtocol securityProtocol = SecurityProtocol.SASL_SSL;
         saslClientConfigs.put(SaslConfigs.SASL_MECHANISM, "OAUTHBEARER");
         saslServerConfigs.put(BrokerSecurityConfigs.SASL_ENABLED_MECHANISMS_CONFIG, Collections.singletonList("OAUTHBEARER"));
+        saslServerConfigs.put(BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG, true);
         saslClientConfigs.put(SaslConfigs.SASL_JAAS_CONFIG,
                 TestJaasConfig.jaasConfigProperty("OAUTHBEARER", Collections.singletonMap("unsecuredLoginStringClaim_sub", TestJaasConfig.USERNAME)));
         saslServerConfigs.put("listener.name.sasl_ssl.oauthbearer." + SaslConfigs.SASL_JAAS_CONFIG,
@@ -2272,6 +2273,9 @@ public class SaslAuthenticatorTest {
         if (serverMechanisms.contains("DIGEST-MD5")) {
             saslServerConfigs.put("digest-md5." + BrokerSecurityConfigs.SASL_SERVER_CALLBACK_HANDLER_CLASS_CONFIG,
                     TestDigestLoginModule.DigestServerCallbackHandler.class.getName());
+        }
+        if (serverMechanisms.contains("OAUTHBEARER")) {
+            saslServerConfigs.put(BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG, true);
         }
         return TestJaasConfig.createConfiguration(clientMechanism, serverMechanisms);
     }

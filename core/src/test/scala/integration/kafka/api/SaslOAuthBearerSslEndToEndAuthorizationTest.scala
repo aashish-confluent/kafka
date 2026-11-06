@@ -16,6 +16,7 @@
  */
 package kafka.api
 
+import org.apache.kafka.common.config.internals.BrokerSecurityConfigs
 import org.apache.kafka.common.security.auth._
 import org.apache.kafka.security.JaasTestUtils
 
@@ -24,4 +25,5 @@ class SaslOAuthBearerSslEndToEndAuthorizationTest extends SaslEndToEndAuthorizat
   override protected def kafkaServerSaslMechanisms = List(kafkaClientSaslMechanism)
   override val clientPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, JaasTestUtils.KAFKA_OAUTH_BEARER_USER)
   override val kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, JaasTestUtils.KAFKA_OAUTH_BEARER_ADMIN)
+  this.serverConfig.setProperty(BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG, "true")
 }

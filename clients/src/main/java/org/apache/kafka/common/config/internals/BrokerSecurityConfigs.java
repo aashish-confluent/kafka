@@ -106,6 +106,16 @@ public class BrokerSecurityConfigs {
             + "listener prefix and SASL mechanism name in lower-case. For example, "
             + "listener.name.sasl_ssl.plain.sasl.server.callback.handler.class=com.example.CustomPlainCallbackHandler.";
 
+    public static final String SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG = "sasl.oauthbearer.allow.unsecured.validator";
+    public static final boolean DEFAULT_SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR = false;
+    public static final String SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_DOC = "The (optional) setting that allows the broker to use the unsecured OAUTHBEARER validator "
+            + "when OAUTHBEARER is enabled on a listener and " + SASL_SERVER_CALLBACK_HANDLER_CLASS_CONFIG + " is not set for it. The unsecured "
+            + "validator accepts unsigned JWTs and is only suitable for non-production use. By default the broker fails at startup in this case; "
+            + "set " + SASL_SERVER_CALLBACK_HANDLER_CLASS_CONFIG + " to a secure validator such as "
+            + "org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallbackHandler, or set this to true to use the unsecured validator. "
+            + "Configuration names can optionally be prefixed with listener prefix and SASL mechanism name in lower-case. For example, "
+            + "listener.name.sasl_ssl.oauthbearer.sasl.oauthbearer.allow.unsecured.validator=true. The default value is 'false'.";
+
     public static final String CONNECTIONS_MAX_REAUTH_MS_CONFIG = "connections.max.reauth.ms";
     public static final long DEFAULT_CONNECTIONS_MAX_REAUTH_MS = 0L;
     public static final String CONNECTIONS_MAX_REAUTH_MS_DOC = "When explicitly set to a positive number (the default is 0, not a positive number), "
@@ -181,6 +191,7 @@ public class BrokerSecurityConfigs {
             .defineInternal(BrokerSecurityConfigs.SASL_MECHANISM_MIRROR_ADMIN_PROTOCOL_CONFIG, STRING, null, null, MEDIUM, BrokerSecurityConfigs.SASL_MECHANISM_MIRROR_ADMIN_PROTOCOL_DOC)
             .define(BrokerSecurityConfigs.SASL_ENABLED_MECHANISMS_CONFIG, LIST, BrokerSecurityConfigs.DEFAULT_SASL_ENABLED_MECHANISMS, ConfigDef.ValidList.anyNonDuplicateValues(true, false), MEDIUM, BrokerSecurityConfigs.SASL_ENABLED_MECHANISMS_DOC)
             .define(BrokerSecurityConfigs.SASL_SERVER_CALLBACK_HANDLER_CLASS_CONFIG, CLASS, null, MEDIUM, BrokerSecurityConfigs.SASL_SERVER_CALLBACK_HANDLER_CLASS_DOC)
+            .define(BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_CONFIG, BOOLEAN, BrokerSecurityConfigs.DEFAULT_SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR, MEDIUM, BrokerSecurityConfigs.SASL_OAUTHBEARER_ALLOW_UNSECURED_VALIDATOR_DOC)
             .define(BrokerSecurityConfigs.SASL_KERBEROS_PRINCIPAL_TO_LOCAL_RULES_CONFIG, LIST, BrokerSecurityConfigs.DEFAULT_SASL_KERBEROS_PRINCIPAL_TO_LOCAL_RULES, ConfigDef.ValidList.anyNonDuplicateValues(true, false), MEDIUM, BrokerSecurityConfigs.SASL_KERBEROS_PRINCIPAL_TO_LOCAL_RULES_DOC)
             .define(SaslConfigs.SASL_JAAS_CONFIG, PASSWORD, null, MEDIUM, SaslConfigs.SASL_JAAS_CONFIG_DOC)
             .define(SaslConfigs.SASL_CLIENT_CALLBACK_HANDLER_CLASS, CLASS, null, MEDIUM, SaslConfigs.SASL_CLIENT_CALLBACK_HANDLER_CLASS_DOC)
