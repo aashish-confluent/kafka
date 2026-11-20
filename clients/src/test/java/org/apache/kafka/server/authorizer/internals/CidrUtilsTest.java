@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Timeout;
 import java.net.InetAddress;
 
 import static org.apache.kafka.server.authorizer.internals.CidrUtils.isInRange;
+import static org.apache.kafka.server.authorizer.internals.CidrUtils.matchesHost;
 import static org.apache.kafka.server.authorizer.internals.CidrUtils.validate;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -108,5 +109,23 @@ public class CidrUtilsTest {
         assertTrue(isInRange("0:0:0:0:0:0:c0a8:105", "::192.168.1.0/24"));
         // IPv6 clients outside the /24 range do not match.
         assertFalse(isInRange("2001:db8::1", "::192.168.1.0/24"));
+    }
+
+    @Test
+    public void testMatchesHost() {
+        assertTrue(matchesHost("*", "2001:db8:0:0:0:0:0:1"));
+        assertTrue(matchesHost("192.168.1.5", "192.168.1.5"));
+        assertTrue(matchesHost("192.168.1.0/24", "192.168.1.5"));
+        assertTrue(matchesHost("2001:db8:0:0:0:0:0:1", "2001:db8:0:0:0:0:0:1"));
+        assertTrue(matchesHost("2001:db8::1", "2001:db8:0:0:0:0:0:1"));
+        assertTrue(matchesHost("2001:DB8::1", "2001:db8:0:0:0:0:0:1"));
+        assertTrue(matchesHost("2001:0db8:0000:0000:0000:0000:0000:0001", "2001:db8:0:0:0:0:0:1"));
+        assertTrue(matchesHost("::1", "0:0:0:0:0:0:0:1"));
+        assertTrue(matchesHost("::ffff:192.168.1.5", "192.168.1.5"));
+        assertTrue(matchesHost("fe80:0:0:0:0:0:0:1%lo0", "fe80:0:0:0:0:0:0:1%lo0"));
+        assertFalse(matchesHost("2001:db8::2", "2001:db8:0:0:0:0:0:1"));
+        assertFalse(matchesHost("192.168.1.6", "192.168.1.5"));
+        assertFalse(matchesHost("example.com", "192.168.1.5"));
+        assertFalse(matchesHost("not:an:address", "2001:db8:0:0:0:0:0:1"));
     }
 }

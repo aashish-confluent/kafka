@@ -20,6 +20,9 @@ package org.apache.kafka.server.authorizer.internals;
 import org.apache.commons.net.util.SubnetUtils;
 import org.apache.commons.net.util.SubnetUtils6;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+
 public final class CidrUtils {
 
     private CidrUtils() {}
@@ -58,6 +61,31 @@ public final class CidrUtils {
             }
         } catch (IllegalArgumentException e) {
             return false;
+        }
+    }
+
+    /**
+     * Checks whether an ACL host matches a host IP address. The ACL host matches if it is the
+     * wildcard, the same string, a CIDR range that contains the address, or an IPv6 address
+     * literal without a scope id that denotes the same address.
+     */
+    public static boolean matchesHost(String aclHost, String host) {
+        return "*".equals(aclHost) || aclHost.equals(host) || isInRange(host, aclHost)
+            || host.equals(canonicalIpv6Address(aclHost));
+    }
+
+    /**
+     * Returns an IPv6 address literal in the form returned by {@link InetAddress#getHostAddress()},
+     * or the host unchanged if it is not an IPv6 address literal or has a scope id.
+     */
+    private static String canonicalIpv6Address(String host) {
+        if (!isIpv6(host) || host.contains("/") || host.contains("%")) {
+            return host;
+        }
+        try {
+            return InetAddress.getByName("[" + host + "]").getHostAddress();
+        } catch (UnknownHostException e) {
+            return host;
         }
     }
 }

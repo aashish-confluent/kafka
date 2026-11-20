@@ -223,7 +223,7 @@ public interface Authorizer extends Configurable, Closeable {
 
         for (AclBinding binding : acls(aclFilter)) {
             String aclHost = binding.entry().host();
-            if (!aclHost.equals(hostAddr) && !aclHost.equals("*") && !CidrUtils.isInRange(hostAddr, aclHost))
+            if (!CidrUtils.matchesHost(aclHost, hostAddr))
                 continue;
 
             if (!SecurityUtils.parseKafkaPrincipal(binding.entry().principal()).equals(principal)

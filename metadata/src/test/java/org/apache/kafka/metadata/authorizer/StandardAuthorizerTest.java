@@ -839,6 +839,25 @@ public class StandardAuthorizerTest {
     }
 
     @Test
+    public void testDenyAclWithCompressedIpv6Host() throws Exception {
+        StandardAuthorizer authorizer = createAndInitializeStandardAuthorizer();
+
+        StandardAclWithId allowAcl = withId(new StandardAcl(
+            TOPIC, "foo", LITERAL, "User:alice", WILDCARD, READ, ALLOW));
+        StandardAclWithId denyAcl = withId(new StandardAcl(
+            TOPIC, "foo", LITERAL, "User:alice", "2001:db8::1", READ, DENY));
+        authorizer.addAcl(allowAcl.id(), allowAcl.acl());
+        authorizer.addAcl(denyAcl.id(), denyAcl.acl());
+
+        AuthorizableRequestContext alice = new MockAuthorizableRequestContext.Builder()
+            .setPrincipal(new KafkaPrincipal(USER_TYPE, "alice"))
+            .setClientAddress(InetAddress.getByName("2001:db8::1"))
+            .build();
+        assertEquals(List.of(DENIED), authorizer.authorize(alice, List.of(newAction(READ, TOPIC, "foo"))));
+        assertEquals(DENIED, authorizer.authorizeByResourceType(alice, READ, TOPIC));
+    }
+
+    @Test
     public void testOverlappingCidrWithWildcardAllow() throws Exception {
         StandardAuthorizer authorizer = createAndInitializeStandardAuthorizer();
 
