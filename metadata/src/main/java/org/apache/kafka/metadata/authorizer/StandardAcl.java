@@ -26,6 +26,7 @@ import org.apache.kafka.common.resource.PatternType;
 import org.apache.kafka.common.resource.ResourcePattern;
 import org.apache.kafka.common.resource.ResourceType;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
+import org.apache.kafka.server.authorizer.internals.HostPatterns;
 
 
 /**
@@ -33,7 +34,31 @@ import org.apache.kafka.common.security.auth.KafkaPrincipal;
  */
 public record StandardAcl(ResourceType resourceType, String resourceName, PatternType patternType, String principal,
                           String host, AclOperation operation,
-                          AclPermissionType permissionType) implements Comparable<StandardAcl> {
+                          AclPermissionType permissionType, String canonicalHost) implements Comparable<StandardAcl> {
+
+    /**
+     * The canonical host is derived from the host. The given value must be null or equal to it.
+     */
+    public StandardAcl {
+        String derivedHost = HostPatterns.canonicalize(host);
+        if (canonicalHost != null && !canonicalHost.equals(derivedHost)) {
+            throw new IllegalArgumentException("canonicalHost " + canonicalHost + " does not match host " + host);
+        }
+        canonicalHost = derivedHost;
+    }
+
+    public StandardAcl(ResourceType resourceType, String resourceName, PatternType patternType, String principal,
+                       String host, AclOperation operation, AclPermissionType permissionType) {
+        this(resourceType, resourceName, patternType, principal, host, operation, permissionType, null);
+    }
+
+    @Override
+    public String toString() {
+        return "StandardAcl[resourceType=" + resourceType + ", resourceName=" + resourceName +
+            ", patternType=" + patternType + ", principal=" + principal + ", host=" + host +
+            ", operation=" + operation + ", permissionType=" + permissionType + "]";
+    }
+
     public static StandardAcl fromRecord(AccessControlEntryRecord record) {
         return new StandardAcl(
             ResourceType.fromCode(record.resourceType()),

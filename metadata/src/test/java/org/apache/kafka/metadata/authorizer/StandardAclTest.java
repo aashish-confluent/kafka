@@ -18,6 +18,10 @@
 package org.apache.kafka.metadata.authorizer;
 
 import org.apache.kafka.common.acl.AclBinding;
+import org.apache.kafka.common.acl.AclOperation;
+import org.apache.kafka.common.acl.AclPermissionType;
+import org.apache.kafka.common.resource.PatternType;
+import org.apache.kafka.common.resource.ResourceType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -26,6 +30,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 
 @Timeout(value = 40)
@@ -65,5 +70,16 @@ public class StandardAclTest {
                 }
             }
         }
+    }
+
+    @Test
+    public void testCanonicalHostIsDerivedFromHost() {
+        assertThrows(IllegalArgumentException.class, () -> new StandardAcl(ResourceType.TOPIC, "foo",
+            PatternType.LITERAL, "User:alice", "192.0.2.99", AclOperation.READ, AclPermissionType.ALLOW, "*"));
+        StandardAcl acl = new StandardAcl(ResourceType.TOPIC, "foo", PatternType.LITERAL, "User:alice",
+            "010.0.0.1", AclOperation.READ, AclPermissionType.ALLOW);
+        assertEquals("10.0.0.1", acl.canonicalHost());
+        assertEquals(acl, new StandardAcl(ResourceType.TOPIC, "foo", PatternType.LITERAL, "User:alice",
+            "010.0.0.1", AclOperation.READ, AclPermissionType.ALLOW, "10.0.0.1"));
     }
 }

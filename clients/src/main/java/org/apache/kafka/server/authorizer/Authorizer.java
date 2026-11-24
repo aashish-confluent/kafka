@@ -32,6 +32,7 @@ import org.apache.kafka.common.resource.ResourceType;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.utils.internals.SecurityUtils;
 import org.apache.kafka.server.authorizer.internals.CidrUtils;
+import org.apache.kafka.server.authorizer.internals.HostPatterns;
 
 import java.io.Closeable;
 import java.util.Collections;
@@ -219,10 +220,10 @@ public interface Authorizer extends Configurable, Closeable {
         KafkaPrincipal principal = new KafkaPrincipal(
             requestContext.principal().getPrincipalType(),
             requestContext.principal().getName());
-        String hostAddr = requestContext.clientAddress().getHostAddress();
+        String hostAddr = HostPatterns.canonicalize(requestContext.clientAddress());
 
         for (AclBinding binding : acls(aclFilter)) {
-            String aclHost = binding.entry().host();
+            String aclHost = HostPatterns.canonicalize(binding.entry().host());
             if (!aclHost.equals(hostAddr) && !aclHost.equals("*") && !CidrUtils.isInRange(hostAddr, aclHost))
                 continue;
 

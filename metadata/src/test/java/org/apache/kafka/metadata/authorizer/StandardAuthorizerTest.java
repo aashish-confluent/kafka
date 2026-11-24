@@ -37,10 +37,12 @@ import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.server.authorizer.Action;
 import org.apache.kafka.server.authorizer.AuthorizableRequestContext;
+import org.apache.kafka.server.authorizer.AuthorizationResult;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
@@ -836,6 +838,47 @@ public class StandardAuthorizerTest {
         assertEquals(List.of(DENIED),
             authorizer.authorize(aliceOnlyInDenyRange, List.of(newAction(READ, TOPIC, "foo"))),
             "Client in DENY /8 range must be denied");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "2001:db8::1, DENY, 2001:db8::1, DENIED",
+        "2001:DB8::1, DENY, 2001:db8::1, DENIED",
+        "2001:0db8:0000:0000:0000:0000:0000:0001, DENY, 2001:db8::1, DENIED",
+        "::ffff:10.0.0.1, DENY, 10.0.0.1, DENIED",
+        "010.0.0.1, DENY, 10.0.0.1, DENIED",
+        "fe80::1, DENY, fe80::1%2, DENIED",
+        "fe80::1%eth0, DENY, fe80::1%2, DENIED",
+        "2001:db8::2, DENY, 2001:db8::1, ALLOWED",
+        "::1, ALLOW, ::1, ALLOWED",
+        "2001:DB8::1%eth0, ALLOW, 2001:db8::1, ALLOWED",
+        "010.0.0.1, ALLOW, 10.0.0.1, ALLOWED",
+        "fe80::1, ALLOW, fe80::1%2, ALLOWED",
+        "2001:db8::2, ALLOW, 2001:db8::1, DENIED"
+    })
+    public void testAclHostMatchesAnySpellingOfClientAddress(String aclHost, AclPermissionType permission,
+                                                             String clientAddress, AuthorizationResult expected) throws Exception {
+        StandardAuthorizer authorizer = createAndInitializeStandardAuthorizer();
+
+        StandardAcl hostAcl = new StandardAcl(TOPIC, "foo", LITERAL, "User:alice", aclHost, READ, permission);
+        StandardAclWithId hostAclWithId = withId(hostAcl);
+        authorizer.addAcl(hostAclWithId.id(), hostAcl);
+        if (permission == DENY) {
+            StandardAcl allowAcl = new StandardAcl(TOPIC, "foo", LITERAL, "User:alice", WILDCARD, READ, ALLOW);
+            StandardAclWithId allowAclWithId = withId(allowAcl);
+            authorizer.addAcl(allowAclWithId.id(), allowAcl);
+            assertContains(authorizer.acls(AclBindingFilter.ANY), allowAcl, hostAcl);
+        } else {
+            assertContains(authorizer.acls(AclBindingFilter.ANY), hostAcl);
+        }
+        assertEquals(aclHost, hostAcl.toBinding().entry().host());
+
+        AuthorizableRequestContext alice = new MockAuthorizableRequestContext.Builder()
+            .setPrincipal(new KafkaPrincipal(USER_TYPE, "alice"))
+            .setClientAddress(InetAddress.getByName(clientAddress))
+            .build();
+        assertEquals(List.of(expected), authorizer.authorize(alice, List.of(newAction(READ, TOPIC, "foo"))));
+        assertEquals(expected, authorizer.authorizeByResourceType(alice, READ, TOPIC));
     }
 
     @Test
