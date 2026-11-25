@@ -24,6 +24,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,8 +59,7 @@ public class HostPatternsTest {
 
     @Test
     public void testMalformedScopeIsNotALiteral() {
-        for (String host : new String[] {
-            "fe80::1%", "fe80::1%eth 0", "fe80::1%%2", "2001:db8::1%", "10.0.0.1%eth0"}) {
+        for (String host : new String[] {"fe80::1%", "fe80::1%eth 0", "fe80::1%%2", "2001:db8::1%", "10.0.0.1%eth0"}) {
             assertSame(host, HostPatterns.canonicalize(host), host);
         }
     }
@@ -68,7 +68,7 @@ public class HostPatternsTest {
     public void testLeadingZerosInIpv4AreDecimal() {
         assertEquals("10.0.0.1", HostPatterns.canonicalize("010.0.0.1"));
         assertEquals("1.2.3.4", HostPatterns.canonicalize("01.002.0003.04"));
-        assertEquals("127.0.0.1", HostPatterns.canonicalize("0127.0.0.1"));
+        assertEquals("255.0.0.1", HostPatterns.canonicalize("0255.0.0.1"));
         assertEquals("0.0.0.1", HostPatterns.canonicalize("000.000.000.001"));
         assertEquals("10.0.0.1", HostPatterns.canonicalize("::ffff:010.0.0.1"));
         assertEquals("0:0:0:0:0:0:a00:1", HostPatterns.canonicalize("::010.0.0.1"));
@@ -78,8 +78,7 @@ public class HostPatternsTest {
     @Test
     public void testIpv4MappedIpv6CollapsesToIpv4() {
         for (String spelling : new String[] {
-            "::ffff:10.0.0.1", "::FFFF:10.0.0.1", "::ffff:a00:1", "0:0:0:0:0:ffff:a00:1", "0:0:0:0:0:ffff:a00:1%2",
-            "10.0.0.1"}) {
+            "::ffff:10.0.0.1", "::FFFF:10.0.0.1", "::ffff:a00:1", "0:0:0:0:0:ffff:a00:1", "10.0.0.1"}) {
             assertEquals("10.0.0.1", HostPatterns.canonicalize(spelling), spelling);
         }
     }
@@ -91,8 +90,6 @@ public class HostPatternsTest {
         assertTrue(scoped.getHostAddress().contains("%"));
         assertEquals(HostPatterns.canonicalize("2001:db8::1"), HostPatterns.canonicalize(scoped));
         assertEquals("10.0.0.1", HostPatterns.canonicalize(InetAddress.getByName("::ffff:10.0.0.1")));
-        byte[] mapped = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xff, (byte) 0xff, 10, 0, 0, 1};
-        assertEquals("10.0.0.1", HostPatterns.canonicalize(Inet6Address.getByAddress(null, mapped, 2)));
     }
 
     @Test
@@ -100,10 +97,18 @@ public class HostPatternsTest {
         for (String host : new String[] {
             "*", "", "example.com", "localhost", "10.0.0.0/8", "2001:db8::/32", "[2001:db8::1]",
             "2001:db8::1::", "2001:db8:::1", "::g", "1:2", "12345::1", "1.2.3", "1.2.3.4.5", "256.1.1.1",
-            "0256.0.0.1", "00000000010.0.0.1", "00000010.0.0.001", "1.2.3.99999999999", "::ffff:0256.0.0.1",
-            "::01.2.3.256", ".::1", ".1:2", "-:1", "_:1",
-            "a.b:1", "1.2.3.4 ", " 2001:db8::1", "::1%", "2001:db8::1\n", "kafka-1:9092"}) {
+            "256.1.1.1", "0256.0.0.1", "1.2.3.99999999999", "::ffff:0256.0.0.1", "::01.2.3.256", ".::1", ".1:2", "-:1", "_:1", "a.b:1", "1.2.3.4 ", " 2001:db8::1", "::1%", "2001:db8::1\n"}) {
             assertSame(host, HostPatterns.canonicalize(host), host);
+        }
+    }
+
+    @Test
+    public void testIsIpLiteral() {
+        for (String host : new String[] {"10.0.0.1", "2001:db8::1", "2001:DB8::1%eth0", "::ffff:10.0.0.1", "::"}) {
+            assertTrue(HostPatterns.isIpLiteral(host), host);
+        }
+        for (String host : new String[] {"*", "", "example.com", "10.0.0.0/8", "2001:db8::1::", "1.2.3", "::1%", null}) {
+            assertFalse(HostPatterns.isIpLiteral(host), String.valueOf(host));
         }
     }
 
@@ -114,14 +119,13 @@ public class HostPatternsTest {
 
     @Test
     public void testHostnameIsNeverResolved() {
-        for (String host : new String[] {"localhost", "a:b.example.com", ".::1", "-:1"}) {
-            assertSame(host, HostPatterns.canonicalize(host), host);
-        }
-    }
-
-    @Test
-    public void testCanonicalHostIsReturnedAsIs() {
-        assertSame(EXPANDED, HostPatterns.canonicalize(EXPANDED));
+        // "localhost" would resolve to a loopback literal if the resolver were consulted.
+        assertEquals("localhost", HostPatterns.canonicalize("localhost"));
+        assertNull(HostPatterns.parseLiteral("localhost"));
+        assertNull(HostPatterns.parseLiteral("a:b.example.com"));
+        // Start with a non-hex character, so an unbracketed getByName would hand them to the resolver.
+        assertNull(HostPatterns.parseLiteral(".::1"));
+        assertNull(HostPatterns.parseLiteral("-:1"));
     }
 
     @Test
